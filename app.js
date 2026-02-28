@@ -99,12 +99,15 @@ function handleClient(text) {
   const lower = text.toLowerCase();
 
   if (lower.includes("hola")) {
-    return `👋 *Bienvenido a Laboratorio Diesel JVH*
-¿En qué podemos ayudarte?
+    // return `👋 *Bienvenido a Laboratorio Diesel JVH*
+    // ¿En qué podemos ayudarte?
 
-1️⃣ Consultar repuesto
-2️⃣ Agendar cita
-3️⃣ Hablar con asesor`;
+    // 1️⃣ Consultar repuesto
+    // 2️⃣ Agendar cita
+    // 3️⃣ Hablar con asesor`;
+
+    return `👋 *Bienvenido a Laboratorio Diesel JVH*
+    ¿En qué podemos ayudarte?`;
   }
 
   // Buscar producto
