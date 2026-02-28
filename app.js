@@ -10,9 +10,44 @@ const verifyToken = process.env.VERIFY_TOKEN;
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
 const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID;
 
-/**
- * 🔹 Verificación del webhook (Meta GET)
- */
+/* ===============================
+   🗄️ BASE DE DATOS LOCAL (DEMO)
+================================ */
+
+const products = [
+  {
+    id: 1,
+    name: "Inyector Isuzu NPR 2014",
+    keywords: ["inyector", "npr", "isuzu"],
+    price: 120,
+    stock: 3
+  },
+  {
+    id: 2,
+    name: "Bomba de Inyección Cummins 6BT",
+    keywords: ["bomba", "inyeccion", "cummins", "6bt"],
+    price: 450,
+    stock: 2
+  },
+  {
+    id: 3,
+    name: "Turbo Ford F-350 6.0",
+    keywords: ["turbo", "ford", "f350"],
+    price: 680,
+    stock: 1
+  }
+];
+
+/* ===============================
+   👑 CONFIGURACIÓN ADMIN
+================================ */
+
+const ADMIN_NUMBER = process.env.ADMIN_NUMBER; // Número del dueño sin +
+
+/* ===============================
+   🔐 VERIFICACIÓN WEBHOOK
+================================ */
+
 app.get('/', (req, res) => {
   const { 'hub.mode': mode, 'hub.challenge': challenge, 'hub.verify_token': token } = req.query;
 
@@ -24,73 +59,103 @@ app.get('/', (req, res) => {
   }
 });
 
-/**
- * 🔹 Recepción de mensajes
- */
-app.post('/', async (req, res) => {
-  const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
-  console.log(`\n\nWebhook received ${timestamp}\n`);
-  console.log(JSON.stringify(req.body, null, 2));
+/* ===============================
+   📩 RECEPCIÓN MENSAJES
+================================ */
 
+app.post('/', async (req, res) => {
   try {
-    const entry = req.body.entry?.[0];
-    const changes = entry?.changes?.[0];
-    const value = changes?.value;
-    const message = value?.messages?.[0];
+    const message = req.body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
 
     if (message) {
       const from = message.from;
       const text = message.text?.body || "";
 
-      console.log("Mensaje:", text);
+      console.log("Mensaje recibido:", text);
 
-      const response = handleMessage(text, from);
+      let response;
+
+      if (from === ADMIN_NUMBER) {
+        response = handleAdmin(text);
+      } else {
+        response = handleClient(text);
+      }
 
       await sendWhatsAppMessage(from, response);
     }
 
-    res.status(200).end();
-
+    res.sendStatus(200);
   } catch (error) {
     console.error("Error:", error.response?.data || error.message);
-    res.status(500).end();
+    res.sendStatus(500);
   }
 });
 
-/**
- * 🔹 Lógica básica del bot (MVP demo)
- */
-function handleMessage(text, from) {
+/* ===============================
+   🤖 LÓGICA CLIENTE
+================================ */
+
+function handleClient(text) {
   const lower = text.toLowerCase();
 
   if (lower.includes("hola")) {
-    return `👋 Hola, soy el asistente del Taller Diesel X.
-¿En qué puedo ayudarte?
+    return `👋 *Bienvenido a Laboratorio Diesel JVH*
+¿En qué podemos ayudarte?
 
 1️⃣ Consultar repuesto
 2️⃣ Agendar cita
 3️⃣ Hablar con asesor`;
   }
 
-  if (lower.includes("stock")) {
-    return `📦 Stock actual:
-🔩 Inyector NPR 2014
-Cantidad disponible: 3 unidades (Demo MVP)`;
+  // Buscar producto
+  const foundProduct = products.find(product =>
+    product.keywords.some(keyword => lower.includes(keyword))
+  );
+
+  if (foundProduct) {
+    return `🔧 *${foundProduct.name}*
+💰 Precio: *$${foundProduct.price}*
+📦 Stock disponible: *${foundProduct.stock} unidades*
+
+¿Desea apartarlo o instalarlo en el taller?`;
   }
 
-  if (lower.includes("inyector")) {
-    return `🔩 Inyector Isuzu NPR 2014
-💲 Precio: $120
-📦 Stock: 3 unidades
-¿Desea apartarlo o instalarlo?`;
+  if (lower.includes("cita")) {
+    return `📅 Para agendar una cita, por favor envíanos:
+• Modelo del vehículo
+• Año
+• Tipo de servicio requerido`;
   }
 
-  return "Gracias por tu mensaje. Un asesor te responderá pronto 👨‍🔧";
+  return "Gracias por escribirnos. Un asesor te responderá pronto 👨‍🔧";
 }
 
-/**
- * 🔹 Enviar mensaje usando Cloud API
- */
+/* ===============================
+   👑 LÓGICA ADMIN
+================================ */
+
+function handleAdmin(text) {
+  const lower = text.toLowerCase();
+
+  if (lower.includes("stock")) {
+    const report = products
+      .map(p => `🔩 ${p.name} → ${p.stock} unidades`)
+      .join("\n");
+
+    return `📊 *Reporte de Stock Actual:*\n\n${report}`;
+  }
+
+  if (lower.includes("ventas")) {
+    return "📈 Ventas del día (demo): $1,240";
+  }
+
+  return "👑 Modo administrador activo.";
+}
+
+/* ===============================
+   📤 ENVIAR MENSAJE
+================================ */
+
 async function sendWhatsAppMessage(to, message) {
   const url = `https://graph.facebook.com/v18.0/${PHONE_NUMBER_ID}/messages`;
 
@@ -112,5 +177,5 @@ async function sendWhatsAppMessage(to, message) {
 }
 
 app.listen(port, () => {
-  console.log(`\nListening on port ${port}\n`);
+  console.log(`Servidor corriendo en puerto ${port}`);
 });
