@@ -98,7 +98,7 @@ app.post('/', async (req, res) => {
 function handleClient(text) {
   const lower = text.toLowerCase();
 
-  if (lower.includes("hola")) {
+  if (lower.includes("hola") || lower.includes("buenos días") || lower.includes("buenas tardes") || lower.includes("buenas noches") || lower.includes("buenas")) {
     // return `👋 *Bienvenido a Laboratorio Diesel JVH*
     // ¿En qué podemos ayudarte?
 
