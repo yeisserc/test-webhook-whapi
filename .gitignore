@@ -1,0 +1,59 @@
+# Dependencies
+node_modules/
+
+# Build
+dist/
+build/
+*.tsbuildinfo
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Tests / coverage
+coverage/
+.nyc_output/
+test-results/
+
+# Nest / tooling
+.nest/
+.webpack/
+
+# Uploads / local evidence (bank automation, screenshots, etc.)
+uploads/
+evidence/
+tmp/
+temp/
+
+# Playwright
+playwright-report/
+blob-report/
+test-results/
+.playwright/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Misc
+*.local
+.cache/
