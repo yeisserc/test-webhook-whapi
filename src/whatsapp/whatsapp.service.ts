@@ -189,6 +189,67 @@ export class WhatsappService {
     }
   }
 
+  /**
+   * Descarga un medio de WhatsApp por media id (Graph API).
+   */
+  async downloadMedia(mediaId: string): Promise<{ buffer: Buffer; mimeType: string }> {
+    if (!mediaId?.trim()) {
+      throw new BadRequestException('Media id is required.');
+    }
+
+    const metaUrl = `https://graph.facebook.com/${this.apiVersion}/${mediaId}`;
+
+    try {
+      const metaResponse = await fetch(metaUrl, {
+        headers: {
+          Authorization: `Bearer ${this.token}`,
+        },
+      });
+
+      const metaData = (await metaResponse.json()) as {
+        url?: string;
+        mime_type?: string;
+        error?: WhatsAppApiError['error'];
+      };
+
+      if (!metaResponse.ok || !metaData.url) {
+        this.logger.error(`Error obteniendo metadata de media: ${JSON.stringify(metaData)}`);
+        throw new InternalServerErrorException(
+          metaData.error?.message ?? 'No se pudo obtener la URL del medio de WhatsApp.',
+        );
+      }
+
+      const fileResponse = await fetch(metaData.url, {
+        headers: {
+          Authorization: `Bearer ${this.token}`,
+        },
+      });
+
+      if (!fileResponse.ok) {
+        throw new InternalServerErrorException(
+          `No se pudo descargar el medio de WhatsApp (${fileResponse.status}).`,
+        );
+      }
+
+      const arrayBuffer = await fileResponse.arrayBuffer();
+      return {
+        buffer: Buffer.from(arrayBuffer),
+        mimeType: metaData.mime_type || fileResponse.headers.get('content-type') || 'image/jpeg',
+      };
+    } catch (error) {
+      if (
+        error instanceof InternalServerErrorException ||
+        error instanceof BadRequestException
+      ) {
+        throw error;
+      }
+
+      throw new InternalServerErrorException(
+        `Error de conexion descargando medio de WhatsApp: ${String(error)}`,
+      );
+    }
+  }
+
   private buildTemplateComponents(
     dto: SendTemplateMessageDto,
   ): WhatsAppTemplateComponent[] {

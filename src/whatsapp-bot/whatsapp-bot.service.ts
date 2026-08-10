@@ -5,6 +5,8 @@ import { Payment } from './entities/payment.entity';
 import { CollectionSend } from './entities/collection-send.entity';
 import { SendReminderDto } from './dto/send-reminder.dto';
 import { ReceiveMessageDto } from './dto/receive-message.dto';
+import { MetaWebhookPayload } from './dto/meta-webhook.dto';
+import type { MetaWebhookMessage } from './dto/meta-webhook.dto';
 import { ProcessPaymentDto } from './dto/process-payment.dto';
 import { Collection } from '../collections/entities/collection.entity';
 import { BankAutomationService, VerifyPaymentBancoDeVenezuelaRequest, VerifyPaymentRequest } from '../bank-automation/bank-automation.service';
@@ -88,64 +90,152 @@ export class WhatsappBotService {
   }
 
   /**
+   * Procesa el payload real del webhook de Meta
+   */
+  async handleMetaWebhook(payload: MetaWebhookPayload): Promise<void> {
+    if (payload.object !== 'whatsapp_business_account') {
+      this.logger.debug(`Webhook ignorado: object=${payload.object ?? 'undefined'}`);
+      return;
+    }
+
+    const messages = this.extractIncomingMessages(payload);
+    if (messages.length === 0) {
+      this.logger.debug('Webhook de Meta sin mensajes entrantes (posible status update).');
+      return;
+    }
+
+    for (const message of messages) {
+      await this.handleIncomingMessage(message);
+    }
+  }
+
+  /**
    * Procesa un mensaje entrante de WhatsApp
    */
   async handleIncomingMessage(dto: ReceiveMessageDto): Promise<void> {
     try {
-      // Si hay media (screenshot o documento), procesar el pago
-      if (dto.mediaUrl && dto.mediaType === 'image') {
-        await this.processPaymentFromScreenshot(dto.phoneNumber, dto.mediaUrl);
+      this.logger.log(
+        `Mensaje recibido de ${dto.phoneNumber} (type=${dto.mediaType ?? 'text'}, id=${dto.messageId ?? 'n/a'})`,
+      );
+
+      if (dto.mediaType === 'image' && (dto.mediaId || dto.mediaUrl)) {
+        await this.processPaymentFromScreenshot(dto.phoneNumber, {
+          mediaId: dto.mediaId,
+          mediaUrl: dto.mediaUrl,
+        });
       } else if (dto.message) {
-        // Si hay solo texto, buscar referencia o número de referencia
         await this.processPaymentFromReference(dto.phoneNumber, dto.message);
       }
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       this.logger.error(`Error procesando mensaje entrante: ${message}`);
-      // TODO: Enviar mensaje de error al cliente
     }
   }
 
   /**
    * Procesa un pago desde un screenshot
    */
-  private async processPaymentFromScreenshot(phoneNumber: string, screenshotUrl: string): Promise<void> {
+  private async processPaymentFromScreenshot(
+    phoneNumber: string,
+    media: { mediaId?: string; mediaUrl?: string },
+  ): Promise<void> {
     try {
-      // Extraer datos del screenshot usando OpenAI
-      // Descargamos la imagen desde la URL y la pasamos como Buffer
-      const imageResponse = await fetch(screenshotUrl);
-      const arrayBuffer = await imageResponse.arrayBuffer();
-      const imageBuffer = Buffer.from(arrayBuffer);
-      const mimeType = imageResponse.headers.get('content-type') || 'image/jpeg';
+      let imageBuffer: Buffer;
+      let mimeType = 'image/jpeg';
+      let screenshotUrl: string | null = media.mediaUrl ?? null;
 
-      const extractedData = await this.openaiExtractionService.extractTransferDataFromImage(imageBuffer, mimeType);
+      if (media.mediaId) {
+        const downloaded = await this.whatsappService.downloadMedia(media.mediaId);
+        imageBuffer = downloaded.buffer;
+        mimeType = downloaded.mimeType;
+        screenshotUrl = media.mediaId;
+      } else if (media.mediaUrl) {
+        const imageResponse = await fetch(media.mediaUrl);
+        const arrayBuffer = await imageResponse.arrayBuffer();
+        imageBuffer = Buffer.from(arrayBuffer);
+        mimeType = imageResponse.headers.get('content-type') || 'image/jpeg';
+      } else {
+        throw new BadRequestException('No se recibió media para procesar el comprobante');
+      }
+
+      const extractedData = await this.openaiExtractionService.extractTransferDataFromImage(
+        imageBuffer,
+        mimeType,
+      );
 
       if (!extractedData || !extractedData.amount || !extractedData.reference) {
         throw new BadRequestException('No se pudo extraer los datos del comprobante');
       }
 
-      // Encontrar la colección correspondiente por teléfono
       const collection = await this.findCollectionByPhoneNumber(phoneNumber);
       if (!collection) {
         throw new BadRequestException('No se encontró cobranza asociada');
       }
 
-      // Crear registro de pago pendiente de verificación
       await this.createPaymentRecord({
         collectionId: collection.id,
         referenceNumber: extractedData.reference,
-        screenshotUrl,
+        screenshotUrl: screenshotUrl ?? undefined,
         amount: extractedData.amount,
         installmentNumber: collection.currentInstallment,
       });
 
-      // TODO: Enviar mensaje de confirmación al cliente
       this.logger.log(`Pago registrado para verificación: ${extractedData.reference}`);
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       this.logger.error(`Error procesando screenshot: ${message}`);
       throw error;
     }
+  }
+
+  private extractIncomingMessages(payload: MetaWebhookPayload): ReceiveMessageDto[] {
+    const results: ReceiveMessageDto[] = [];
+
+    for (const entry of payload.entry ?? []) {
+      for (const change of entry.changes ?? []) {
+        if (change.field && change.field !== 'messages') {
+          continue;
+        }
+
+        for (const message of change.value?.messages ?? []) {
+          const normalized = this.normalizeMetaMessage(message);
+          if (normalized) {
+            results.push(normalized);
+          }
+        }
+      }
+    }
+
+    return results;
+  }
+
+  private normalizeMetaMessage(message: MetaWebhookMessage): ReceiveMessageDto | null {
+    const phoneNumber = message.from?.replace(/\D/g, '');
+    if (!phoneNumber) {
+      return null;
+    }
+
+    if (message.type === 'text' && message.text?.body?.trim()) {
+      return {
+        phoneNumber,
+        message: message.text.body.trim(),
+        messageId: message.id,
+        mediaType: 'text',
+      };
+    }
+
+    if (message.type === 'image' && message.image?.id) {
+      return {
+        phoneNumber,
+        message: message.image.caption?.trim(),
+        mediaId: message.image.id,
+        mediaType: 'image',
+        messageId: message.id,
+      };
+    }
+
+    this.logger.debug(`Mensaje de Meta ignorado: type=${message.type ?? 'unknown'}`);
+    return null;
   }
 
   /**

@@ -11,7 +11,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { WhatsappBotService } from './whatsapp-bot.service';
-import { ReceiveMessageDto } from './dto/receive-message.dto';
+import { MetaWebhookPayload } from './dto/meta-webhook.dto';
 import { SendReminderDto } from './dto/send-reminder.dto';
 import { Payment } from './entities/payment.entity';
 
@@ -47,12 +47,16 @@ export class WhatsappBotController {
   }
 
   /**
-   * Webhook para recibir mensajes de WhatsApp
+   * Webhook para recibir el payload real de Meta
    */
   @Post('webhook')
-  async handleWebhook(@Body() dto: ReceiveMessageDto): Promise<{ success: boolean }> {
-    this.logger.log(`Mensaje recibido de ${dto.phoneNumber}`);
-    this.whatsappBotService.handleIncomingMessage(dto);
+  handleWebhook(@Body() payload: MetaWebhookPayload): { success: boolean } {
+    console.log('processing webhook...', JSON.stringify(payload, null, 2));
+    void this.whatsappBotService.handleMetaWebhook(payload).catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Error procesando webhook de Meta: ${message}`);
+    });
+
     return { success: true };
   }
 
