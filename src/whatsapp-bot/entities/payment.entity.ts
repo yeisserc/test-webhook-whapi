@@ -8,7 +8,7 @@ import {
   UpdateDateColumn,
   ValueTransformer,
 } from 'typeorm';
-import { Collection } from '../../collections/entities/collection.entity';
+import { CollectionSend } from './collection-send.entity';
 
 const decimalTransformer: ValueTransformer = {
   to: (value?: number | null) => (value ?? null),
@@ -20,16 +20,16 @@ export class Payment {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
-  @Column({ name: 'collection_id', type: 'uuid' })
-  collectionId!: string;
+  @Column({ name: 'collection_send_id', type: 'uuid' })
+  collectionSendId!: string;
 
-  @ManyToOne(() => Collection, {
+  @ManyToOne(() => CollectionSend, {
     nullable: false,
     onDelete: 'CASCADE',
     eager: true,
   })
-  @JoinColumn({ name: 'collection_id' })
-  collection!: Collection;
+  @JoinColumn({ name: 'collection_send_id' })
+  collectionSend!: CollectionSend;
 
   @Column({
     type: 'numeric',
@@ -43,7 +43,7 @@ export class Payment {
   installmentNumber!: number;
 
   @Column({ name: 'reference_number', type: 'varchar', length: 100, nullable: true })
-  referenceNumber!: string;
+  referenceNumber!: string | null;
 
   @Column({ name: 'screenshot_url', type: 'text', nullable: true })
   screenshotUrl!: string | null;

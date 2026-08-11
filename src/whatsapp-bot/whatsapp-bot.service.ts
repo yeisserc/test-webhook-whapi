@@ -167,17 +167,17 @@ export class WhatsappBotService {
         throw new BadRequestException('No se pudo extraer los datos del comprobante');
       }
 
-      const collection = await this.findCollectionByPhoneNumber(phoneNumber);
-      if (!collection) {
-        throw new BadRequestException('No se encontró cobranza asociada');
+      const collectionSend = await this.findLatestCollectionSendByPhoneNumber(phoneNumber);
+      if (!collectionSend) {
+        throw new BadRequestException('No se encontró un envío de cobranza asociado');
       }
 
       await this.createPaymentRecord({
-        collectionId: collection.id,
+        collectionSendId: collectionSend.id,
         referenceNumber: extractedData.reference,
         screenshotUrl: screenshotUrl ?? undefined,
         amount: extractedData.amount,
-        installmentNumber: collection.currentInstallment,
+        installmentNumber: collectionSend.installmentNumber,
       });
 
       this.logger.log(`Pago registrado para verificación: ${extractedData.reference}`);
@@ -243,17 +243,16 @@ export class WhatsappBotService {
    */
   private async processPaymentFromReference(phoneNumber: string, reference: string): Promise<void> {
     try {
-      const collection = await this.findCollectionByPhoneNumber(phoneNumber);
-      if (!collection) {
-        throw new BadRequestException('No se encontró cobranza asociada');
+      const collectionSend = await this.findLatestCollectionSendByPhoneNumber(phoneNumber);
+      if (!collectionSend) {
+        throw new BadRequestException('No se encontró un envío de cobranza asociado');
       }
 
-      // Crear registro de pago pendiente de verificación
       await this.createPaymentRecord({
-        collectionId: collection.id,
+        collectionSendId: collectionSend.id,
         referenceNumber: reference.trim(),
-        amount: collection.currentDebt,
-        installmentNumber: collection.currentInstallment,
+        amount: Number(collectionSend.amountBs),
+        installmentNumber: collectionSend.installmentNumber,
       });
 
       this.logger.log(`Pago registrado para verificación: ${reference}`);
@@ -271,21 +270,18 @@ export class WhatsappBotService {
     try {
       const payment = await this.paymentRepository.findOne({
         where: { id: paymentId },
-        relations: { collection: { user: true, client: true } },
+        relations: {
+          collectionSend: {
+            collection: { user: true, client: true },
+          },
+        },
       });
 
       if (!payment) {
         throw new BadRequestException('Payment not found');
       }
 
-      const collectionSend = await this.collectionSendRepository.findOne({
-        where: {
-          collectionId: payment.collectionId,
-          installmentNumber: payment.installmentNumber,
-        },
-        order: { sentAt: 'DESC' },
-      });
-
+      const collectionSend = payment.collectionSend;
       if (!collectionSend) {
         payment.status = 'rejected';
         payment.notes = 'No se encontró un envío de cobranza asociado a este pago';
@@ -312,8 +308,8 @@ export class WhatsappBotService {
         return;
       }
 
-      const bankUsername = payment.collection?.user?.bankUsername?.trim();
-      const bankPassword = payment.collection?.user?.bankPassword?.trim();
+      const bankUsername = collectionSend.collection?.user?.bankUsername?.trim();
+      const bankPassword = collectionSend.collection?.user?.bankPassword?.trim();
 
       if (!bankUsername || !bankPassword) {
         throw new BadRequestException('Bank credentials not found for the collection user.');
@@ -326,14 +322,14 @@ export class WhatsappBotService {
         },
         paymentData: {
           amount: payment.amount,
-          reference: payment.referenceNumber ?? '',
+          reference: payment.referenceNumber?.slice(-6) ?? '',
         },
       };
       const result = await this.bankAutomationService.verifyPaymentBDV(verifyPayload);
       const isVerified = result?.movementIsCorrect ?? false;
 
       if (!isVerified) {
-        console.log("Payment not verified");
+        console.log('Payment not verified');
         payment.status = 'rejected';
         payment.notes = 'No se pudo validar el pago en el banco';
 
@@ -342,12 +338,15 @@ export class WhatsappBotService {
           'No pudimos validar tu pago. Por favor ponte en contacto con tu vendedor.',
         );
       } else {
-        console.log("Payment verified");
+        console.log('Payment verified');
         payment.status = 'verified';
         payment.verifiedAt = new Date();
 
-        // Actualizar la colección marcando la cuota como pagada
-        await this.updateCollectionPayment(payment.collection.id, payment.installmentNumber);
+        await this.updateCollectionPayment(
+          collectionSend.collection.id,
+          payment.installmentNumber,
+          Number(collectionSend.amountUsd),
+        );
 
         await this.notifyClientPaymentResult(
           payment,
@@ -366,7 +365,7 @@ export class WhatsappBotService {
   }
 
   private async notifyClientPaymentResult(payment: Payment, message: string): Promise<void> {
-    const client = payment.collection.client;
+    const client = payment.collectionSend.collection.client;
     const clientPhone = `${client.countryCode ?? ''}${client.phoneCode}${client.phoneNumber}`;
     await this.whatsappService.sendTextMessage(clientPhone, message);
   }
@@ -377,7 +376,11 @@ export class WhatsappBotService {
   async getPendingPayments(): Promise<Payment[]> {
     return this.paymentRepository.find({
       where: { status: 'pending' },
-      relations: { collection: true },
+      relations: {
+        collectionSend: {
+          collection: { client: true, user: true },
+        },
+      },
       order: { createdAt: 'ASC' },
     });
   }
@@ -419,36 +422,45 @@ export class WhatsappBotService {
 
   // ==================== HELPERS ====================
 
-  private async findCollectionByPhoneNumber(phoneNumber: string): Promise<Collection | null> {
+  /**
+   * Busca la última CollectionSend enviada cuya Collection pertenece
+   * al cliente identificado por countryCode + phoneCode + phoneNumber.
+   */
+  private async findLatestCollectionSendByPhoneNumber(
+    phoneNumber: string,
+  ): Promise<CollectionSend | null> {
     const cleanedPhone = phoneNumber.replace(/\D/g, '');
 
-    const collection = await this.collectionRepository
-      .createQueryBuilder('c')
-      .leftJoinAndSelect('c.client', 'client')
+    const collectionSend = await this.collectionSendRepository
+      .createQueryBuilder('cs')
+      .innerJoinAndSelect('cs.collection', 'collection')
+      .innerJoinAndSelect('collection.client', 'client')
       .where(
         "CONCAT(COALESCE(client.countryCode, ''), client.phoneCode, client.phoneNumber) = :phone",
         { phone: cleanedPhone },
       )
-      .orderBy('c.createdAt', 'DESC')
+      .orderBy('cs.sentAt', 'DESC')
       .getOne();
 
-    return collection || null;
+    return collectionSend || null;
   }
 
   private async createPaymentRecord(dto: ProcessPaymentDto): Promise<Payment> {
-    const collection = await this.collectionRepository.findOne({
-      where: { id: dto.collectionId },
+    const collectionSend = await this.collectionSendRepository.findOne({
+      where: { id: dto.collectionSendId },
+      relations: { collection: { client: true } },
     });
 
-    if (!collection) {
-      throw new BadRequestException('Collection not found');
+    if (!collectionSend) {
+      throw new BadRequestException('Collection send not found');
     }
 
     const payment = this.paymentRepository.create({
-      collection,
+      collectionSendId: collectionSend.id,
+      collectionSend,
       amount: dto.amount,
       installmentNumber: dto.installmentNumber,
-      referenceNumber: dto.referenceNumber,
+      referenceNumber: dto.referenceNumber ?? null,
       screenshotUrl: dto.screenshotUrl || null,
       status: 'pending',
       notes: null,
@@ -457,23 +469,18 @@ export class WhatsappBotService {
     return this.paymentRepository.save(payment);
   }
 
-  private async updateCollectionPayment(collectionId: string, installmentNumber: number): Promise<void> {
+  private async updateCollectionPayment(
+    collectionId: string,
+    installmentNumber: number,
+    amountPaid: number,
+  ): Promise<void> {
     const collection = await this.collectionRepository.findOne({
       where: { id: collectionId },
     });
 
     if (collection) {
-      // Restar el monto pagado de la deuda actual
       collection.currentInstallment = installmentNumber + 1;
-      
-      const payment = await this.paymentRepository.findOne({
-        where: { collectionId, installmentNumber },
-      });
-
-      if (payment) {
-        collection.currentDebt = Math.max(0, collection.currentDebt - payment.amount);
-      }
-
+      collection.currentDebt = Math.max(0, collection.currentDebt - amountPaid);
       await this.collectionRepository.save(collection);
     }
   }
