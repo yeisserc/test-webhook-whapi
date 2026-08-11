@@ -1,5 +1,5 @@
 export class ProcessPaymentDto {
-  collectionId!: string;
+  collectionSendId!: string;
   referenceNumber?: string;
   screenshotUrl?: string;
   amount!: number;
