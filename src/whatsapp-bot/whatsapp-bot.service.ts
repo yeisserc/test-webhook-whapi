@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { IsNull, LessThanOrEqual, Repository } from 'typeorm';
 import { Payment } from './entities/payment.entity';
 import { CollectionSend } from './entities/collection-send.entity';
 import { SendReminderDto } from './dto/send-reminder.dto';
@@ -15,6 +15,8 @@ import { CollectionsService } from '../collections/collections.service';
 import { CurrencyRatesService } from '../currency-rates/currency-rates.service';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
 
+const BANK_VERIFICATION_RETRY_MINUTES = 10;
+const MAX_BANK_VERIFICATION_ATTEMPTS = 3;
 @Injectable()
 export class WhatsappBotService {
   private readonly logger = new Logger(WhatsappBotService.name);
@@ -358,11 +360,42 @@ export class WhatsappBotService {
         },
       };
       const result = await this.bankAutomationService.verifyPaymentBDV(verifyPayload);
+      const attempts = (payment.verificationAttempts ?? 0) + 1;
+      payment.verificationAttempts = attempts;
+
+      // Error técnico del banco (timeout, página no carga, etc.): reintentar más tarde
+      if (result?.isTechnicalError) {
+        if (attempts >= MAX_BANK_VERIFICATION_ATTEMPTS) {
+          payment.status = 'rejected';
+          payment.nextVerificationAt = null;
+          payment.notes = `No se pudo consultar el banco tras ${attempts} intentos: ${result.error}`;
+          await this.paymentRepository.save(payment);
+          await this.notifyClientPaymentResult(
+            payment,
+            'No pudimos validar tu pago. Por favor ponte en contacto con tu vendedor.',
+          );
+          return;
+        }
+
+        payment.status = 'pending';
+        payment.nextVerificationAt = new Date(
+          Date.now() + attempts * BANK_VERIFICATION_RETRY_MINUTES * 60 * 1000,
+        );
+        payment.notes = `Reintento programado (${attempts}/${MAX_BANK_VERIFICATION_ATTEMPTS}): ${result.error}`;
+        await this.paymentRepository.save(payment);
+        this.logger.warn(
+          `Error técnico verificando pago ${payment.id}. Reintento #${attempts} en ${BANK_VERIFICATION_RETRY_MINUTES} min.`,
+        );
+        return;
+      }
+
       const isVerified = result?.movementIsCorrect ?? false;
 
       if (!isVerified) {
+        // Banco respondió bien pero el movimiento no existe / no coincide: no reintentar
         console.log('Payment not verified');
         payment.status = 'rejected';
+        payment.nextVerificationAt = null;
         payment.notes = 'No se pudo validar el pago en el banco';
 
         await this.notifyClientPaymentResult(
@@ -373,6 +406,7 @@ export class WhatsappBotService {
         console.log('Payment verified');
         payment.status = 'verified';
         payment.verifiedAt = new Date();
+        payment.nextVerificationAt = null;
 
         await this.updateCollectionPayment(
           collectionSend.collection.id,
@@ -403,11 +437,23 @@ export class WhatsappBotService {
   }
 
   /**
-   * Obtiene pagos pendientes de verificación
+   * Obtiene pagos pendientes listos para verificación
+   * (sin reintento programado, o ya venció el tiempo de espera).
    */
   async getPendingPayments(): Promise<Payment[]> {
+    const now = new Date();
+
     return this.paymentRepository.find({
-      where: { status: 'pending' },
+      where: [
+        {
+          status: 'pending',
+          nextVerificationAt: IsNull(),
+        },
+        {
+          status: 'pending',
+          nextVerificationAt: LessThanOrEqual(now),
+        },
+      ],
       relations: {
         collectionSend: {
           collection: { client: true, user: true },
@@ -496,6 +542,8 @@ export class WhatsappBotService {
       screenshotUrl: dto.screenshotUrl || null,
       status: 'pending',
       notes: null,
+      verificationAttempts: 0,
+      nextVerificationAt: null,
     });
 
     return this.paymentRepository.save(payment);

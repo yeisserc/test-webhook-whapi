@@ -54,6 +54,12 @@ export class Payment {
   @Column({ type: 'text', nullable: true })
   notes!: string | null;
 
+  @Column({ name: 'verification_attempts', type: 'int', default: 0 })
+  verificationAttempts!: number;
+
+  @Column({ name: 'next_verification_at', type: 'timestamp', nullable: true })
+  nextVerificationAt!: Date | null;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt!: Date;
 
