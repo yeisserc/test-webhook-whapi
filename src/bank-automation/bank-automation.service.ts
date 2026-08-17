@@ -47,7 +47,7 @@ type ExtractedMovement = {
   text: string;
 };
 
-type BancoDeVenezuelaMovement = {
+export type BancoDeVenezuelaMovement = {
   date: string;
   reference: string;
   description: string;
@@ -63,6 +63,14 @@ export type VerifyPaymentBancoDeVenezuelaRequest = {
     amount: number;
     reference: string;
   };
+};
+
+export type VerifyPaymentBancoDeVenezuelaResult = {
+  error: string;
+  /** true = falla técnica (página, timeout, login); se puede reintentar */
+  isTechnicalError: boolean;
+  movementIsCorrect: boolean;
+  movements?: BancoDeVenezuelaMovement[];
 };
 
 @Injectable()
@@ -89,7 +97,9 @@ export class BankAutomationService {
     })
   }
 
-  async verifyPaymentBDV(payload: VerifyPaymentBancoDeVenezuelaRequest) {
+  async verifyPaymentBDV(
+    payload: VerifyPaymentBancoDeVenezuelaRequest,
+  ): Promise<VerifyPaymentBancoDeVenezuelaResult> {
 
     console.log("Verifying payment with payload:", payload);
 
@@ -206,9 +216,10 @@ export class BankAutomationService {
       await this.sleep(5);
 
       return {
-        error: "",
+        error: '',
+        isTechnicalError: false,
         movementIsCorrect: !!matchedMovement,
-        movements
+        movements,
       };
     } catch (error) {
       console.log("Error in verifyPaymentBDV: ", error);
@@ -216,6 +227,7 @@ export class BankAutomationService {
       await this.sleep(2);
       return {
         error: `No se pudo completar la verificacion automatica: ${String(error)}`,
+        isTechnicalError: true,
         movementIsCorrect: false,
       };
     } finally {
