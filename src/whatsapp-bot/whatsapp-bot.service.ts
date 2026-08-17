@@ -180,10 +180,26 @@ export class WhatsappBotService {
         installmentNumber: collectionSend.installmentNumber,
       });
 
+      await this.whatsappService.sendTextMessage(
+        phoneNumber,
+        'Su pago se está verificando, le avisamos cuando lo hayamos validado.',
+      );
+
       this.logger.log(`Pago registrado para verificación: ${extractedData.reference}`);
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       this.logger.error(`Error procesando screenshot: ${message}`);
+
+      try {
+        await this.whatsappService.sendTextMessage(
+          phoneNumber,
+          'Hubo un error al procesar su pago. Por favor reenvíe la captura o el número de referencia.',
+        );
+      } catch (notifyError: unknown) {
+        const notifyMessage = notifyError instanceof Error ? notifyError.message : String(notifyError);
+        this.logger.error(`Error notificando fallo de screenshot: ${notifyMessage}`);
+      }
+
       throw error;
     }
   }
@@ -255,10 +271,26 @@ export class WhatsappBotService {
         installmentNumber: collectionSend.installmentNumber,
       });
 
+      await this.whatsappService.sendTextMessage(
+        phoneNumber,
+        'Su pago se está verificando, le avisamos cuando lo hayamos validado.',
+      );
+
       this.logger.log(`Pago registrado para verificación: ${reference}`);
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       this.logger.error(`Error procesando referencia: ${message}`);
+
+      try {
+        await this.whatsappService.sendTextMessage(
+          phoneNumber,
+          'Hubo un error al procesar su pago. Por favor reenvíe la captura o el número de referencia.',
+        );
+      } catch (notifyError: unknown) {
+        const notifyMessage = notifyError instanceof Error ? notifyError.message : String(notifyError);
+        this.logger.error(`Error notificando fallo de referencia: ${notifyMessage}`);
+      }
+
       throw error;
     }
   }
