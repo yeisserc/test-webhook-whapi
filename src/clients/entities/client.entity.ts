@@ -35,8 +35,8 @@ export class Client {
   @Column({ type: 'varchar', length: 120, nullable: true })
   nickname!: string | null;
 
-  @Column({ type: 'varchar', length: 4, nullable: true })
-  countryCode!: string | null;
+  @Column({ type: 'varchar', length: 4, default: '58' })
+  countryCode!: string;
 
   @Column({ type: 'varchar', length: 10 })
   phoneCode!: string;

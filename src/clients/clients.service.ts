@@ -51,7 +51,7 @@ export class ClientsService {
       throw new BadRequestException('Last name is required.');
     }
 
-    const phoneCode = payload.phoneCode?.trim();
+    const phoneCode = this.normalizePhoneCode(payload.phoneCode);
     const phoneNumber = payload.phoneNumber?.trim();
 
     if (!phoneCode) {
@@ -67,7 +67,7 @@ export class ClientsService {
       firstName,
       lastName,
       nickname: nickname || null,
-      countryCode: countryCode || null,
+      countryCode: countryCode || '58',
       phoneCode,
       phoneNumber,
     });
@@ -106,11 +106,11 @@ export class ClientsService {
 
     if (payload.countryCode !== undefined) {
       const countryCode = payload.countryCode.trim();
-      client.countryCode = countryCode || null;
+      client.countryCode = countryCode || '58';
     }
 
     if (payload.phoneCode !== undefined) {
-      const phoneCode = payload.phoneCode.trim();
+      const phoneCode = this.normalizePhoneCode(payload.phoneCode);
       if (!phoneCode) {
         throw new BadRequestException('Phone code cannot be empty.');
       }
@@ -147,5 +147,14 @@ export class ClientsService {
     if (!exists) {
       throw new BadRequestException('The provided user does not exist.');
     }
+  }
+
+  /** Quita el 0 inicial local (0412 → 412) para formato internacional. */
+  private normalizePhoneCode(phoneCode?: string): string {
+    const trimmed = phoneCode?.trim() ?? '';
+    if (!trimmed) {
+      return '';
+    }
+    return trimmed.replace(/^0+/, '') || trimmed;
   }
 }
