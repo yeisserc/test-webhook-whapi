@@ -60,6 +60,7 @@ export class WhatsappBotService {
         templateName,
         dto.daysUntilPayment,
         amountUsd,
+        amountBs,
       );
 
       await this.whatsappService.sendTemplateMessage({
@@ -476,13 +477,12 @@ export class WhatsappBotService {
   async sendAutomaticReminders(daysOffset: number): Promise<number> {
     try {
       const collections = await this.getCollectionsNeedingReminders(daysOffset);
-
       for (const collection of collections) {
         try {
           await this.sendReminder({
             collectionId: collection.id,
             daysUntilPayment: daysOffset,
-            phoneNumber: `58${collection.client.phoneCode}${collection.client.phoneNumber}`,
+            phoneNumber: `${collection.client.countryCode}${collection.client.phoneCode}${collection.client.phoneNumber}`,
           });
         } catch (error: unknown) {
           const errorMsg = error instanceof Error ? error.message : String(error);
@@ -582,6 +582,7 @@ export class WhatsappBotService {
     templateName: 'is_payment_date' | 'two_days_for_payme_day',
     daysUntilPayment: number,
     amountUsd: number,
+    amountBs: number,
   ): Record<string, string> {
     const currentDate = new Date().toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
     const clientName = `${collection.client.firstName} ${collection.client.lastName}`;
@@ -593,6 +594,7 @@ export class WhatsappBotService {
         current_date: currentDate,
         amount: amountUsd.toFixed(2) + '$',
         payment_description: paymentDescription,
+        amount_bs: amountBs.toFixed(2) + ' Bs.',
       };
     }
 

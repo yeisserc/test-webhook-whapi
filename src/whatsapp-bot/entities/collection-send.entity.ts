@@ -4,10 +4,12 @@ import {
   Entity,
   JoinColumn,
   ManyToOne,
+  OneToMany,
   PrimaryGeneratedColumn,
   ValueTransformer,
 } from 'typeorm';
 import { Collection } from '../../collections/entities/collection.entity';
+import { Payment } from './payment.entity';
 
 const decimalTransformer: ValueTransformer = {
   to: (value?: number | null) => (value ?? null),
@@ -30,7 +32,7 @@ export class CollectionSend {
   @JoinColumn({ name: 'collection_id' })
   collection!: Collection;
 
-  @Column({ name: 'sent_at', type: 'timestamp' })
+  @Column({ name: 'sent_at', type: 'timestamptz' })
   sentAt!: Date;
 
   @Column({
@@ -66,6 +68,9 @@ export class CollectionSend {
   @Column({ name: 'installment_number', type: 'int' })
   installmentNumber!: number;
 
-  @CreateDateColumn({ name: 'created_at' })
+  @OneToMany(() => Payment, (payment) => payment.collectionSend)
+  payments!: Payment[];
+
+  @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
 }
