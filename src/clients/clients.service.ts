@@ -1,7 +1,10 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { User } from '../users/entities/user.entity';
+import { Collection } from '../collections/entities/collection.entity';
+import { CollectionSend } from '../whatsapp-bot/entities/collection-send.entity';
+import { Payment } from '../whatsapp-bot/entities/payment.entity';
 import { CreateClientDto } from './dto/create-client.dto';
 import type { UpdateClientDto } from './dto/update-client.dto';
 import { Client } from './entities/client.entity';
@@ -13,6 +16,12 @@ export class ClientsService {
     private readonly clientsRepository: Repository<Client>,
     @InjectRepository(User)
     private readonly usersRepository: Repository<User>,
+    @InjectRepository(Collection)
+    private readonly collectionsRepository: Repository<Collection>,
+    @InjectRepository(CollectionSend)
+    private readonly collectionSendsRepository: Repository<CollectionSend>,
+    @InjectRepository(Payment)
+    private readonly paymentsRepository: Repository<Payment>,
   ) {}
 
   findAll(userId?: string) {
@@ -33,6 +42,81 @@ export class ClientsService {
     }
 
     return client;
+  }
+
+  async getPaymentHistory(clientId: string) {
+    const client = await this.findOne(clientId);
+
+    const collections = await this.collectionsRepository.find({
+      where: { clientId },
+      order: { createdAt: 'DESC' },
+    });
+
+    const history = await Promise.all(
+      collections.map(async (collection) => {
+        const sends = await this.collectionSendsRepository.find({
+          where: { collectionId: collection.id },
+          order: { sentAt: 'DESC', installmentNumber: 'DESC' },
+        });
+
+        const sendIds = sends.map((send) => send.id);
+        const payments = sendIds.length
+          ? await this.paymentsRepository.find({
+              where: { collectionSendId: In(sendIds) },
+              order: { createdAt: 'DESC' },
+            })
+          : [];
+
+        const paymentsBySendId = payments.reduce<Record<string, Payment[]>>((acc, payment) => {
+          const key = payment.collectionSendId;
+          if (!acc[key]) acc[key] = [];
+          acc[key].push(payment);
+          return acc;
+        }, {});
+
+        return {
+          id: collection.id,
+          concept: collection.concept,
+          frequency: collection.frequency,
+          collectionDay: collection.collectionDay,
+          totalDebt: collection.totalDebt,
+          currentDebt: collection.currentDebt,
+          installments: collection.installments,
+          currentInstallment: collection.currentInstallment,
+          createdAt: collection.createdAt,
+          sends: sends.map((send) => ({
+            id: send.id,
+            sentAt: send.sentAt,
+            installmentNumber: send.installmentNumber,
+            amountUsd: send.amountUsd,
+            amountBs: send.amountBs,
+            currency: send.currency,
+            payments: (paymentsBySendId[send.id] ?? []).map((payment) => ({
+              id: payment.id,
+              amount: payment.amount,
+              installmentNumber: payment.installmentNumber,
+              referenceNumber: payment.referenceNumber,
+              status: payment.status,
+              notes: payment.notes,
+              createdAt: payment.createdAt,
+              verifiedAt: payment.verifiedAt,
+            })),
+          })),
+        };
+      }),
+    );
+
+    return {
+      client: {
+        id: client.id,
+        firstName: client.firstName,
+        lastName: client.lastName,
+        nickname: client.nickname,
+        phoneCode: client.phoneCode,
+        phoneNumber: client.phoneNumber,
+      },
+      collections: history,
+    };
   }
 
   async create(payload: CreateClientDto) {

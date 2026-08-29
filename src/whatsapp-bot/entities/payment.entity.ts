@@ -23,7 +23,7 @@ export class Payment {
   @Column({ name: 'collection_send_id', type: 'uuid' })
   collectionSendId!: string;
 
-  @ManyToOne(() => CollectionSend, {
+  @ManyToOne(() => CollectionSend, (collectionSend) => collectionSend.payments, {
     nullable: false,
     onDelete: 'CASCADE',
     eager: true,
@@ -57,15 +57,15 @@ export class Payment {
   @Column({ name: 'verification_attempts', type: 'int', default: 0 })
   verificationAttempts!: number;
 
-  @Column({ name: 'next_verification_at', type: 'timestamp', nullable: true })
+  @Column({ name: 'next_verification_at', type: 'timestamptz', nullable: true })
   nextVerificationAt!: Date | null;
 
-  @CreateDateColumn({ name: 'created_at' })
+  @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
 
-  @UpdateDateColumn({ name: 'updated_at' })
+  @UpdateDateColumn({ name: 'updated_at', type: 'timestamptz' })
   updatedAt!: Date;
 
-  @Column({ name: 'verified_at', type: 'timestamp', nullable: true })
+  @Column({ name: 'verified_at', type: 'timestamptz', nullable: true })
   verifiedAt!: Date | null;
 }

@@ -12,6 +12,11 @@ export class ClientsController {
     return this.clientsService.findAll(userId);
   }
 
+  @Get(':id/payment-history')
+  getPaymentHistory(@Param('id', new ParseUUIDPipe()) id: string) {
+    return this.clientsService.getPaymentHistory(id);
+  }
+
   @Get(':id')
   findOne(@Param('id', new ParseUUIDPipe()) id: string) {
     return this.clientsService.findOne(id);
