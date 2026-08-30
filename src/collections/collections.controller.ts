@@ -9,13 +9,17 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
+import { WhatsappBotService } from '../whatsapp-bot/whatsapp-bot.service';
 import { CollectionsService } from './collections.service';
 import { CreateCollectionDto } from './dto/create-collection.dto';
 import type { UpdateCollectionDto } from './dto/update-collection.dto';
 
 @Controller('collections')
 export class CollectionsController {
-  constructor(private readonly collectionsService: CollectionsService) {}
+  constructor(
+    private readonly collectionsService: CollectionsService,
+    private readonly whatsappBotService: WhatsappBotService,
+  ) {}
 
   @Get()
   findAll(
@@ -46,5 +50,13 @@ export class CollectionsController {
   @Delete(':id')
   remove(@Param('id', new ParseUUIDPipe()) id: string) {
     return this.collectionsService.remove(id);
+  }
+
+  /**
+   * Envía manualmente el cobro de la cuota en curso (WhatsApp + registro de envío).
+   */
+  @Post(':id/send-charge')
+  sendCharge(@Param('id', new ParseUUIDPipe()) id: string) {
+    return this.whatsappBotService.sendManualCharge(id);
   }
 }

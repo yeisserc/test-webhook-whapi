@@ -38,7 +38,7 @@ export class WhatsappBotService {
   /**
    * Envía un mensaje de recordatorio de cobranza
    */
-  async sendReminder(dto: SendReminderDto): Promise<void> {
+  async sendReminder(dto: SendReminderDto): Promise<CollectionSend | null> {
     try {
       const collection = await this.collectionRepository.findOne({
         where: { id: dto.collectionId },
@@ -71,7 +71,7 @@ export class WhatsappBotService {
 
       // Solo registrar el envío el día de cobro (no el recordatorio de 2 días antes)
       if (dto.daysUntilPayment === 0) {
-        await this.collectionSendRepository.save(
+        return this.collectionSendRepository.save(
           this.collectionSendRepository.create({
             collectionId: collection.id,
             collection,
@@ -84,12 +84,74 @@ export class WhatsappBotService {
           }),
         );
       }
+
+      return null;
     } catch (error: unknown) {
       console.log(`sendReminder error: ${error}`);
       const message = error instanceof Error ? error.message : String(error);
       this.logger.error(`Error enviando recordatorio: ${message}`);
       throw error;
     }
+  }
+
+  /**
+   * Envía manualmente el cobro de la cuota en curso.
+   */
+  async sendManualCharge(collectionId: string): Promise<{
+    collectionId: string;
+    installmentNumber: number;
+    amountUsd: number;
+    amountBs: number;
+    collectionSendId: string;
+  }> {
+    const collection = await this.collectionRepository.findOne({
+      where: { id: collectionId },
+      relations: { client: true },
+    });
+
+    if (!collection) {
+      throw new BadRequestException('Collection not found');
+    }
+
+    if (Number(collection.currentDebt) <= 0) {
+      throw new BadRequestException('Esta cobranza ya está saldada.');
+    }
+
+    if (collection.currentInstallment > collection.installments) {
+      throw new BadRequestException('Todas las cuotas de esta cobranza ya fueron cobradas.');
+    }
+
+    const client = collection.client;
+    if (!client?.phoneCode?.trim() || !client?.phoneNumber?.trim()) {
+      throw new BadRequestException('El cliente no tiene teléfono configurado.');
+    }
+
+    const phoneNumber = `${client.countryCode ?? '58'}${client.phoneCode}${client.phoneNumber}`;
+    const amountUsd = Number((collection.totalDebt / collection.installments).toFixed(2));
+    const currencyRate = await this.currencyRatesService.getCurrentRate('USD');
+    const amountBs = Number((amountUsd * currencyRate).toFixed(2));
+
+    const collectionSend = await this.sendReminder({
+      collectionId: collection.id,
+      daysUntilPayment: 0,
+      phoneNumber,
+    });
+
+    if (!collectionSend) {
+      throw new BadRequestException('No se pudo registrar el envío de cobro.');
+    }
+
+    this.logger.log(
+      `Envío manual de cobro para cobranza ${collection.id}, cuota ${collection.currentInstallment}`,
+    );
+
+    return {
+      collectionId: collection.id,
+      installmentNumber: collectionSend.installmentNumber,
+      amountUsd: collectionSend.amountUsd,
+      amountBs: collectionSend.amountBs,
+      collectionSendId: collectionSend.id,
+    };
   }
 
   /**
