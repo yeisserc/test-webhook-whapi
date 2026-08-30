@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { WhatsappBotService } from './whatsapp-bot.service';
 import { WhatsappBotController } from './whatsapp-bot.controller';
@@ -18,7 +18,7 @@ import { WhatsappModule } from '../whatsapp/whatsapp.module';
     TypeOrmModule.forFeature([Payment, CollectionSend, Collection, Client]),
     BankAutomationModule,
     OpenaiExtractionModule,
-    CollectionsModule,
+    forwardRef(() => CollectionsModule),
     CurrencyRatesModule,
     WhatsappModule,
   ],
