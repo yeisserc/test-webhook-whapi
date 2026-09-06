@@ -29,6 +29,9 @@ export class User {
   @Column({ name: 'bank_password', type: 'varchar', length: 255, nullable: true })
   bankPassword!: string | null;
 
+  @Column({ name: 'valid_bank_credentials', type: 'boolean', default: false })
+  validBankCredentials!: boolean;
+
   @OneToMany(() => Client, (client) => client.user)
   clients!: Client[];
 

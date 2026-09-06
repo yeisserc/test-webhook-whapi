@@ -65,6 +65,7 @@ export class UsersService {
       phoneNumber: null,
       bankUsername: null,
       bankPassword: null,
+      validBankCredentials: false,
     });
 
     const saved = await this.usersRepository.save(user);
@@ -113,12 +114,19 @@ export class UsersService {
     }
 
     const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
+
+    let validBankCredentials = false;
+    if (bankUsername && bankPassword) {
+      validBankCredentials = true;
+    }
+
     const user = this.usersRepository.create({
       email,
       password: hashedPassword,
       phoneNumber,
       bankUsername,
       bankPassword,
+      validBankCredentials,
     });
 
     const saved = await this.usersRepository.save(user);
@@ -144,9 +152,20 @@ export class UsersService {
 
     user.bankUsername = bankUsername;
     user.bankPassword = bankPassword;
+    user.validBankCredentials = true;
 
     const saved = await this.usersRepository.save(user);
     return this.toPublicUser(saved);
+  }
+
+  async markBankCredentialsInvalid(userId: string): Promise<void> {
+    const user = await this.usersRepository.findOne({ where: { id: userId } });
+    if (!user) {
+      return;
+    }
+
+    user.validBankCredentials = false;
+    await this.usersRepository.save(user);
   }
 
   async update(id: string, payload: UpdateUserDto) {
@@ -182,14 +201,16 @@ export class UsersService {
       user.phoneNumber = phoneNumber || null;
     }
 
-    if (payload.bankUsername !== undefined) {
+    if (payload.bankUsername && payload.bankUsername.trim()) {
       const bankUsername = payload.bankUsername.trim();
-      user.bankUsername = bankUsername || null;
+      user.bankUsername = bankUsername;
+      user.validBankCredentials = true;
     }
 
-    if (payload.bankPassword !== undefined) {
+    if (payload.bankPassword && payload.bankPassword.trim()) {
       const bankPassword = payload.bankPassword.trim();
-      user.bankPassword = bankPassword || null;
+      user.bankPassword = bankPassword;
+      user.validBankCredentials = true;
     }
 
     const saved = await this.usersRepository.save(user);

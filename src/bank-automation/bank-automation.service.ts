@@ -71,6 +71,7 @@ export type VerifyPaymentBancoDeVenezuelaResult = {
   isTechnicalError: boolean;
   movementIsCorrect: boolean;
   movements?: BancoDeVenezuelaMovement[];
+  invalidCredentials?: boolean;
 };
 
 @Injectable()
@@ -151,26 +152,28 @@ export class BankAutomationService {
       });
       await page.click(submitButtonSelector);
 
-      const loginAdvanced = await page
-        .waitForSelector(movementsEntrySelector, { timeout: 8000 })
-        .then(() => true)
-        .catch(() => false);
-
-      if (!loginAdvanced) {
+      let loginOutcome: 'invalid-credentials' | 'success';
+      try {
+        loginOutcome = await this.waitForLoginOutcome(page, movementsEntrySelector, 8000);
+      } catch {
         // Retry once after forcing another blur in case the form was not marked as touched.
         await page.click(passwordInputSelector);
         await page.press(passwordInputSelector, 'Tab');
         await page.click(submitButtonSelector);
+        loginOutcome = await this.waitForLoginOutcome(page, movementsEntrySelector, timeout);
       }
 
-      // Wait for the account overview page to load and display the button to view account movements
-      // await page.waitForSelector("mat-toolbar[class='mat-elevation-z1 navbar hide-on-med-and-down mat-toolbar mat-toolbar-single-row']", {
-      await page.waitForSelector(movementsEntrySelector, {
-        timeout,
-      });
+      if (loginOutcome === 'invalid-credentials') {
+        return {
+          error: `El usuario o la contraseña son incorrectos.`,
+          isTechnicalError: false,
+          movementIsCorrect: false,
+          invalidCredentials: true,
+        };
+      }
 
       // Click the button to view account movements
-      await page.click("#cdk-accordion-child-1  table.table-saldo-cuenta > tbody > tr > td:nth-child(3) > mat-icon");
+      await page.click(movementsEntrySelector);
 
       // Wait for the account movements page to load and display the table of movements
       // We specifically wait for the input field to search by reference, which indicates that the page has loaded and is ready for interaction
@@ -238,6 +241,28 @@ export class BankAutomationService {
 
   async sleep(seconds: number) {
     return new Promise((resolve) => setTimeout(resolve, seconds * 1000));
+  }
+
+  private async waitForLoginOutcome(
+    page: Page,
+    movementsEntrySelector: string,
+    timeoutMs: number,
+  ): Promise<'invalid-credentials' | 'success'> {
+    const invalidCredentials = page
+      .locator('snack-bar-container:has-text("Autenticación incorrecta.")')
+      .getByText('Autenticación incorrecta.', { exact: true });
+    const movementsEntry = page.locator(movementsEntrySelector);
+
+    await invalidCredentials.or(movementsEntry).waitFor({
+      state: 'visible',
+      timeout: timeoutMs,
+    });
+
+    if (await invalidCredentials.isVisible()) {
+      return 'invalid-credentials';
+    }
+
+    return 'success';
   }
 
   private async extractBancoDeVenezuelaMovements(page: Page) {

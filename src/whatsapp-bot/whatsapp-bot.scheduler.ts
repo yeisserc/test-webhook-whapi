@@ -46,7 +46,7 @@ export class WhatsappBotSchedulerService {
    * Se ejecutaría cada 30 minutos con: @Cron(CronExpression.EVERY_30_MINUTES)
    */ 
   // @Cron(CronExpression.EVERY_10_MINUTES, {
-  @Cron("0 1/10 * * * *", {
+  @Cron("0 5/10 * * * *", {
     timeZone: 'America/Caracas',
   })
   async verifyPendingPayments(): Promise<void> {

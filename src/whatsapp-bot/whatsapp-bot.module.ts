@@ -12,6 +12,7 @@ import { CollectionsModule } from '../collections/collections.module';
 import { CurrencyRatesModule } from '../currency-rates/currency-rates.module';
 import { Client } from '../clients/entities/client.entity';
 import { WhatsappModule } from '../whatsapp/whatsapp.module';
+import { UsersModule } from '../users/users.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { WhatsappModule } from '../whatsapp/whatsapp.module';
     forwardRef(() => CollectionsModule),
     CurrencyRatesModule,
     WhatsappModule,
+    UsersModule,
   ],
   controllers: [WhatsappBotController],
   providers: [WhatsappBotService, WhatsappBotSchedulerService],
