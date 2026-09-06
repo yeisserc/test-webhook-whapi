@@ -14,6 +14,8 @@ import { OpenaiExtractionService } from '../openai-extraction/openai-extraction.
 import { CollectionsService } from '../collections/collections.service';
 import { CurrencyRatesService } from '../currency-rates/currency-rates.service';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
+import { UsersService } from '../users/users.service';
+import { User } from '../users/entities/user.entity';
 
 const BANK_VERIFICATION_RETRY_MINUTES = 10;
 const MAX_BANK_VERIFICATION_ATTEMPTS = 3;
@@ -33,6 +35,7 @@ export class WhatsappBotService {
     private readonly collectionsService: CollectionsService,
     private readonly currencyRatesService: CurrencyRatesService,
     private readonly whatsappService: WhatsappService,
+    private readonly usersService: UsersService,
   ) {}
 
   /**
@@ -405,17 +408,18 @@ export class WhatsappBotService {
         return;
       }
 
-      const bankUsername = collectionSend.collection?.user?.bankUsername?.trim();
-      const bankPassword = collectionSend.collection?.user?.bankPassword?.trim();
-
-      if (!bankUsername || !bankPassword) {
-        throw new BadRequestException('Bank credentials not found for the collection user.');
+      const user = collectionSend.collection?.user;
+      if (!this.canVerifyUserBank(user)) {
+        this.logger.warn(
+          `Pago ${payment.id} omitido: el usuario no tiene credenciales bancarias válidas.`,
+        );
+        return;
       }
 
       const verifyPayload: VerifyPaymentBancoDeVenezuelaRequest = {
         credentials: {
-          username: bankUsername,
-          password: bankPassword,
+          username: user.bankUsername!.trim(),
+          password: user.bankPassword!.trim(),
         },
         paymentData: {
           amount: payment.amount,
@@ -423,6 +427,20 @@ export class WhatsappBotService {
         },
       };
       const result = await this.bankAutomationService.verifyPaymentBDV(verifyPayload);
+
+      if (result?.invalidCredentials) {
+        if (user.id) {
+          await this.usersService.markBankCredentialsInvalid(user.id);
+        }
+        payment.notes = 'Verificación en pausa: credenciales bancarias inválidas';
+        await this.paymentRepository.save(payment);
+        await this.notifySellerInvalidBankCredentials(user);
+        this.logger.warn(
+          `Credenciales bancarias inválidas para el usuario ${user.id}. Pago ${payment.id} en pausa.`,
+        );
+        return;
+      }
+
       const attempts = (payment.verificationAttempts ?? 0) + 1;
       payment.verificationAttempts = attempts;
 
@@ -499,6 +517,36 @@ export class WhatsappBotService {
     await this.whatsappService.sendTextMessage(clientPhone, message);
   }
 
+  private canVerifyUserBank(user?: User | null): user is User {
+    return Boolean(
+      user?.validBankCredentials &&
+        user.bankUsername?.trim() &&
+        user.bankPassword?.trim(),
+    );
+  }
+
+  private async notifySellerInvalidBankCredentials(user: User): Promise<void> {
+    const phone = user.phoneNumber?.trim();
+    if (!phone) {
+      this.logger.warn(
+        `Usuario ${user.id} con credenciales bancarias inválidas, pero no tiene teléfono para notificar.`,
+      );
+      return;
+    }
+
+    try {
+      await this.whatsappService.sendTextMessage(
+        phone,
+        'Tus credenciales bancarias son inválidas. Debes cambiarlas para poder validar los pagos que recibas.',
+      );
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(
+        `No se pudo notificar al usuario ${user.id} que sus credenciales bancarias son inválidas: ${message}`,
+      );
+    }
+  }
+
   /**
    * Obtiene pagos pendientes listos para verificación
    * (sin reintento programado, o ya venció el tiempo de espera).
@@ -506,7 +554,7 @@ export class WhatsappBotService {
   async getPendingPayments(): Promise<Payment[]> {
     const now = new Date();
 
-    return this.paymentRepository.find({
+    const payments = await this.paymentRepository.find({
       where: [
         {
           status: 'pending',
@@ -524,6 +572,8 @@ export class WhatsappBotService {
       },
       order: { createdAt: 'ASC' },
     });
+
+    return payments.filter((payment) => this.canVerifyUserBank(payment.collectionSend?.collection?.user));
   }
 
   /**
