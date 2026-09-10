@@ -1,4 +1,5 @@
-import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { createUuidPipe } from '../common/uuid.pipe';
 import { ClientsService } from './clients.service';
 import { CreateClientDto } from './dto/create-client.dto';
 import type { UpdateClientDto } from './dto/update-client.dto';
@@ -13,12 +14,12 @@ export class ClientsController {
   }
 
   @Get(':id/payment-history')
-  getPaymentHistory(@Param('id', new ParseUUIDPipe()) id: string) {
+  getPaymentHistory(@Param('id', createUuidPipe()) id: string) {
     return this.clientsService.getPaymentHistory(id);
   }
 
   @Get(':id')
-  findOne(@Param('id', new ParseUUIDPipe()) id: string) {
+  findOne(@Param('id', createUuidPipe()) id: string) {
     return this.clientsService.findOne(id);
   }
 
@@ -29,14 +30,14 @@ export class ClientsController {
 
   @Patch(':id')
   update(
-    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('id', createUuidPipe()) id: string,
     @Body() payload: UpdateClientDto,
   ) {
     return this.clientsService.update(id, payload);
   }
 
   @Delete(':id')
-  remove(@Param('id', new ParseUUIDPipe()) id: string) {
+  remove(@Param('id', createUuidPipe()) id: string) {
     return this.clientsService.remove(id);
   }
 }

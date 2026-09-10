@@ -4,11 +4,11 @@ import {
   Delete,
   Get,
   Param,
-  ParseUUIDPipe,
   Patch,
   Post,
   Query,
 } from '@nestjs/common';
+import { createUuidPipe } from '../common/uuid.pipe';
 import { WhatsappBotService } from '../whatsapp-bot/whatsapp-bot.service';
 import { CollectionsService } from './collections.service';
 import { CreateCollectionDto } from './dto/create-collection.dto';
@@ -30,7 +30,7 @@ export class CollectionsController {
   }
 
   @Get(':id')
-  findOne(@Param('id', new ParseUUIDPipe()) id: string) {
+  findOne(@Param('id', createUuidPipe()) id: string) {
     return this.collectionsService.findOne(id);
   }
 
@@ -41,14 +41,14 @@ export class CollectionsController {
 
   @Patch(':id')
   update(
-    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('id', createUuidPipe()) id: string,
     @Body() payload: UpdateCollectionDto,
   ) {
     return this.collectionsService.update(id, payload);
   }
 
   @Delete(':id')
-  remove(@Param('id', new ParseUUIDPipe()) id: string) {
+  remove(@Param('id', createUuidPipe()) id: string) {
     return this.collectionsService.remove(id);
   }
 
@@ -56,7 +56,7 @@ export class CollectionsController {
    * Envía manualmente el cobro de la cuota en curso (WhatsApp + registro de envío).
    */
   @Post(':id/send-charge')
-  sendCharge(@Param('id', new ParseUUIDPipe()) id: string) {
+  sendCharge(@Param('id', createUuidPipe()) id: string) {
     return this.whatsappBotService.sendManualCharge(id);
   }
 }

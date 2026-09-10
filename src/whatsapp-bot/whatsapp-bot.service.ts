@@ -49,7 +49,7 @@ export class WhatsappBotService {
       });
 
       if (!collection) {
-        throw new BadRequestException('Collection not found');
+        throw new BadRequestException('Cobranza no encontrada');
       }
 
       const currency = 'USD';
@@ -113,7 +113,7 @@ export class WhatsappBotService {
     });
 
     if (!collection) {
-      throw new BadRequestException('Collection not found');
+      throw new BadRequestException('Cobranza no encontrada');
     }
 
     if (Number(collection.currentDebt) <= 0) {
@@ -378,7 +378,7 @@ export class WhatsappBotService {
       });
 
       if (!payment) {
-        throw new BadRequestException('Payment not found');
+        throw new BadRequestException('Pago no encontrado');
       }
 
       const collectionSend = payment.collectionSend;
@@ -642,7 +642,7 @@ export class WhatsappBotService {
     });
 
     if (!collectionSend) {
-      throw new BadRequestException('Collection send not found');
+      throw new BadRequestException('Envío de cobranza no encontrado');
     }
 
     const payment = this.paymentRepository.create({

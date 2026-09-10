@@ -31,7 +31,7 @@ export class UsersService {
   async findOne(id: string) {
     const user = await this.usersRepository.findOne({ where: { id } });
     if (!user) {
-      throw new NotFoundException('User not found.');
+      throw new NotFoundException('Usuario no encontrado.');
     }
 
     return this.toPublicUser(user);
@@ -42,20 +42,20 @@ export class UsersService {
     const password = payload.password?.trim();
 
     if (!email) {
-      throw new BadRequestException('Email is required.');
+      throw new BadRequestException('El correo es obligatorio.');
     }
 
     if (!this.isValidEmail(email)) {
-      throw new BadRequestException('Email format is invalid.');
+      throw new BadRequestException('El formato del correo no es válido.');
     }
 
     if (!password || password.length < 6) {
-      throw new BadRequestException('Password must be at least 6 characters.');
+      throw new BadRequestException('La contraseña debe tener al menos 6 caracteres.');
     }
 
     const existing = await this.usersRepository.findOne({ where: { email } });
     if (existing) {
-      throw new BadRequestException('A user with this email already exists.');
+      throw new BadRequestException('Ya existe un usuario con este correo.');
     }
 
     const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
@@ -77,17 +77,17 @@ export class UsersService {
     const password = payload.password?.trim();
 
     if (!email || !password) {
-      throw new BadRequestException('Email and password are required.');
+      throw new BadRequestException('El correo y la contraseña son obligatorios.');
     }
 
     const user = await this.usersRepository.findOne({ where: { email } });
     if (!user) {
-      throw new UnauthorizedException('Invalid email or password.');
+      throw new UnauthorizedException('Correo o contraseña incorrectos.');
     }
 
     const matches = await bcrypt.compare(password, user.password);
     if (!matches) {
-      throw new UnauthorizedException('Invalid email or password.');
+      throw new UnauthorizedException('Correo o contraseña incorrectos.');
     }
 
     return this.toPublicUser(user);
@@ -101,16 +101,16 @@ export class UsersService {
     const bankPassword = payload.bankPassword?.trim() || null;
 
     if (!email) {
-      throw new BadRequestException('Email is required.');
+      throw new BadRequestException('El correo es obligatorio.');
     }
 
     if (!password || password.length < 6) {
-      throw new BadRequestException('Password must be at least 6 characters.');
+      throw new BadRequestException('La contraseña debe tener al menos 6 caracteres.');
     }
 
     const existing = await this.usersRepository.findOne({ where: { email } });
     if (existing) {
-      throw new BadRequestException('A user with this email already exists.');
+      throw new BadRequestException('Ya existe un usuario con este correo.');
     }
 
     const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
@@ -136,18 +136,18 @@ export class UsersService {
   async updateBankAccount(id: string, payload: UpdateBankAccountDto) {
     const user = await this.usersRepository.findOne({ where: { id } });
     if (!user) {
-      throw new NotFoundException('User not found.');
+      throw new NotFoundException('Usuario no encontrado.');
     }
 
     const bankUsername = payload.bankUsername?.trim();
     const bankPassword = payload.bankPassword?.trim();
 
     if (!bankUsername) {
-      throw new BadRequestException('Bank username is required.');
+      throw new BadRequestException('El usuario bancario es obligatorio.');
     }
 
     if (!bankPassword) {
-      throw new BadRequestException('Bank password is required.');
+      throw new BadRequestException('La contraseña bancaria es obligatoria.');
     }
 
     user.bankUsername = bankUsername;
@@ -171,18 +171,18 @@ export class UsersService {
   async update(id: string, payload: UpdateUserDto) {
     const user = await this.usersRepository.findOne({ where: { id } });
     if (!user) {
-      throw new NotFoundException('User not found.');
+      throw new NotFoundException('Usuario no encontrado.');
     }
 
     if (payload.email !== undefined) {
       const email = payload.email.trim().toLowerCase();
       if (!email) {
-        throw new BadRequestException('Email cannot be empty.');
+        throw new BadRequestException('El correo no puede estar vacío.');
       }
 
       const existing = await this.usersRepository.findOne({ where: { email } });
       if (existing && existing.id !== id) {
-        throw new BadRequestException('A user with this email already exists.');
+        throw new BadRequestException('Ya existe un usuario con este correo.');
       }
 
       user.email = email;
@@ -191,7 +191,7 @@ export class UsersService {
     if (payload.password !== undefined) {
       const password = payload.password.trim();
       if (!password || password.length < 6) {
-        throw new BadRequestException('Password must be at least 6 characters.');
+        throw new BadRequestException('La contraseña debe tener al menos 6 caracteres.');
       }
       user.password = await bcrypt.hash(password, SALT_ROUNDS);
     }
@@ -220,13 +220,13 @@ export class UsersService {
   async remove(id: string) {
     const user = await this.usersRepository.findOne({ where: { id } });
     if (!user) {
-      throw new NotFoundException('User not found.');
+      throw new NotFoundException('Usuario no encontrado.');
     }
 
     await this.usersRepository.remove(user);
 
     return {
-      message: 'User deleted successfully.',
+      message: 'Usuario eliminado correctamente.',
       id,
     };
   }

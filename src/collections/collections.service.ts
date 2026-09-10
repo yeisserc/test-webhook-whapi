@@ -36,7 +36,7 @@ export class CollectionsService {
       relations: { user: true, client: true },
     });
     if (!collection) {
-      throw new NotFoundException('Collection not found.');
+      throw new NotFoundException('Cobranza no encontrada.');
     }
 
     return collection;
@@ -114,7 +114,7 @@ export class CollectionsService {
     if (payload.concept !== undefined) {
       const concept = payload.concept.trim();
       if (!concept) {
-        throw new BadRequestException('Concept cannot be empty.');
+        throw new BadRequestException('El concepto no puede estar vacío.');
       }
       collection.concept = concept;
     }
@@ -129,33 +129,33 @@ export class CollectionsService {
     await this.collectionsRepository.remove(collection);
 
     return {
-      message: 'Collection deleted successfully.',
+      message: 'Cobranza eliminada correctamente.',
       id,
     };
   }
 
   private async assertUserExists(userId: string) {
     if (!userId?.trim()) {
-      throw new BadRequestException('User id is required.');
+      throw new BadRequestException('El id de usuario es obligatorio.');
     }
 
     const exists = await this.usersRepository.exists({ where: { id: userId } });
     if (!exists) {
-      throw new BadRequestException('The provided user does not exist.');
+      throw new BadRequestException('El usuario indicado no existe.');
     }
   }
 
   private async assertClientExists(clientId: string) {
     const exists = await this.clientsRepository.exists({ where: { id: clientId } });
     if (!exists) {
-      throw new BadRequestException('The provided client does not exist.');
+      throw new BadRequestException('El cliente indicado no existe.');
     }
   }
 
   private async assertClientBelongsToUser(clientId: string, userId: string) {
     const client = await this.clientsRepository.findOne({ where: { id: clientId } });
     if (!client || client.userId !== userId) {
-      throw new BadRequestException('The client does not belong to the provided user.');
+      throw new BadRequestException('El cliente no pertenece al usuario indicado.');
     }
   }
 
@@ -167,36 +167,36 @@ export class CollectionsService {
     frequency: string;
   }) {
     if (!Number.isFinite(Number(payload.totalDebt)) || Number(payload.totalDebt) < 0) {
-      throw new BadRequestException('Total debt must be a number greater than or equal to 0.');
+      throw new BadRequestException('La deuda total debe ser un número mayor o igual a 0.');
     }
 
     if (!Number.isFinite(Number(payload.currentDebt)) || Number(payload.currentDebt) < 0) {
-      throw new BadRequestException('Current debt must be a number greater than or equal to 0.');
+      throw new BadRequestException('La deuda actual debe ser un número mayor o igual a 0.');
     }
 
     if (!Number.isInteger(Number(payload.installments)) || Number(payload.installments) <= 0) {
-      throw new BadRequestException('Installments must be an integer greater than 0.');
+      throw new BadRequestException('Las cuotas deben ser un entero mayor que 0.');
     }
 
     if (!Number.isInteger(Number(payload.currentInstallment)) || Number(payload.currentInstallment) <= 0) {
-      throw new BadRequestException('Current installment must be an integer greater than 0.');
+      throw new BadRequestException('La cuota actual debe ser un entero mayor que 0.');
     }
 
     if (Number(payload.currentInstallment) > Number(payload.installments)) {
-      throw new BadRequestException('Current installment cannot be greater than installments.');
+      throw new BadRequestException('La cuota actual no puede ser mayor que el total de cuotas.');
     }
 
     if (!payload.frequency?.trim()) {
-      throw new BadRequestException('Collection frequency is required.');
+      throw new BadRequestException('La frecuencia de cobro es obligatoria.');
     }
 
     const freq = payload.frequency.trim();
     if (freq !== 'Manual' && !(payload as { collectionDay?: string | null }).collectionDay?.trim()) {
-      throw new BadRequestException('Collection day is required for the selected frequency.');
+      throw new BadRequestException('El día de cobro es obligatorio para la frecuencia seleccionada.');
     }
 
     if (!(payload as { concept?: string | null }).concept?.trim()) {
-      throw new BadRequestException('Concept is required.');
+      throw new BadRequestException('El concepto es obligatorio.');
     }
   }
 

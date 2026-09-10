@@ -91,13 +91,15 @@ export class WhatsappService {
         console.log(`sendTemplateMessage error: ${JSON.stringify(data)}`);
         const apiError = data as WhatsAppApiError;
         const errorMessage =
-          apiError.error?.message ?? 'Error al enviar mensaje de WhatsApp'
+          apiError.error?.message ?? 'Error al enviar mensaje de WhatsApp';
 
         this.logger.error(
-          `WhatsApp API error (${response.status}): ${JSON.stringify(data)}`,
+          `WhatsApp API error (${response.status}): ${errorMessage} | ${JSON.stringify(data)}`,
         );
 
-        throw new InternalServerErrorException(errorMessage);
+        throw new InternalServerErrorException(
+          'No se pudo enviar el mensaje de WhatsApp. Inténtalo de nuevo.',
+        );
       }
 
       const result = data as WhatsAppSendMessageResponse;
@@ -115,7 +117,7 @@ export class WhatsappService {
       }
 
       throw new InternalServerErrorException(
-        `Error de conexion con WhatsApp API: ${String(error)}`,
+        'Error de conexión con la API de WhatsApp. Inténtalo de nuevo.',
       );
     }
   }
@@ -128,11 +130,11 @@ export class WhatsappService {
     const text = body?.trim();
 
     if (!phone) {
-      throw new BadRequestException('Phone number is required.');
+      throw new BadRequestException('El número de teléfono es obligatorio.');
     }
 
     if (!text) {
-      throw new BadRequestException('Message body is required.');
+      throw new BadRequestException('El cuerpo del mensaje es obligatorio.');
     }
 
     const payload = {
@@ -162,14 +164,15 @@ export class WhatsappService {
 
       if (!response.ok) {
         const apiError = data as WhatsAppApiError;
-        const errorMessage =
-          apiError.error?.message ?? 'Error al enviar mensaje de WhatsApp';
-
         this.logger.error(
           `WhatsApp API error (${response.status}): ${JSON.stringify(data)}`,
         );
 
-        throw new InternalServerErrorException(errorMessage);
+        throw new InternalServerErrorException(
+          apiError.error?.message
+            ? 'No se pudo enviar el mensaje de WhatsApp. Inténtalo de nuevo.'
+            : 'Error al enviar mensaje de WhatsApp',
+        );
       }
 
       const result = data as WhatsAppSendMessageResponse;
@@ -184,7 +187,7 @@ export class WhatsappService {
       }
 
       throw new InternalServerErrorException(
-        `Error de conexion con WhatsApp API: ${String(error)}`,
+        'Error de conexión con la API de WhatsApp. Inténtalo de nuevo.',
       );
     }
   }
@@ -194,7 +197,7 @@ export class WhatsappService {
    */
   async downloadMedia(mediaId: string): Promise<{ buffer: Buffer; mimeType: string }> {
     if (!mediaId?.trim()) {
-      throw new BadRequestException('Media id is required.');
+      throw new BadRequestException('El id del medio es obligatorio.');
     }
 
     const metaUrl = `https://graph.facebook.com/${this.apiVersion}/${mediaId}`;
@@ -215,7 +218,7 @@ export class WhatsappService {
       if (!metaResponse.ok || !metaData.url) {
         this.logger.error(`Error obteniendo metadata de media: ${JSON.stringify(metaData)}`);
         throw new InternalServerErrorException(
-          metaData.error?.message ?? 'No se pudo obtener la URL del medio de WhatsApp.',
+          'No se pudo obtener la URL del medio de WhatsApp.',
         );
       }
 
