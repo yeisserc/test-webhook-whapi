@@ -13,6 +13,7 @@ import { CurrencyRatesModule } from '../currency-rates/currency-rates.module';
 import { Client } from '../clients/entities/client.entity';
 import { WhatsappModule } from '../whatsapp/whatsapp.module';
 import { UsersModule } from '../users/users.module';
+import { MailModule } from '../mail/mail.module';
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { UsersModule } from '../users/users.module';
     CurrencyRatesModule,
     WhatsappModule,
     UsersModule,
+    MailModule,
   ],
   controllers: [WhatsappBotController],
   providers: [WhatsappBotService, WhatsappBotSchedulerService],
