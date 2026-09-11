@@ -21,7 +21,7 @@ export class CurrencyRatesService {
   async findLatest(currency: string): Promise<CurrencyRate> {
     const normalizedCurrency = currency?.trim().toUpperCase();
     if (!normalizedCurrency) {
-      throw new BadRequestException('Currency is required.');
+      throw new BadRequestException('La moneda es obligatoria.');
     }
 
     const [latest] = await this.currencyRatesRepository.find({
@@ -31,7 +31,7 @@ export class CurrencyRatesService {
     });
 
     if (!latest) {
-      throw new NotFoundException(`No rate found for currency ${normalizedCurrency}.`);
+      throw new NotFoundException(`No se encontró tasa para la moneda ${normalizedCurrency}.`);
     }
 
     return latest;
@@ -47,11 +47,11 @@ export class CurrencyRatesService {
     const rate = Number(payload.rate);
 
     if (!currency) {
-      throw new BadRequestException('Currency is required.');
+      throw new BadRequestException('La moneda es obligatoria.');
     }
 
     if (!Number.isFinite(rate) || rate <= 0) {
-      throw new BadRequestException('Rate must be a number greater than 0.');
+      throw new BadRequestException('La tasa debe ser un número mayor que 0.');
     }
 
     const currencyRate = this.currencyRatesRepository.create({ currency, rate });

@@ -16,6 +16,7 @@ import { CurrencyRatesService } from '../currency-rates/currency-rates.service';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
 import { UsersService } from '../users/users.service';
 import { User } from '../users/entities/user.entity';
+import { MailService } from '../mail/mail.service';
 
 const BANK_VERIFICATION_RETRY_MINUTES = 10;
 const MAX_BANK_VERIFICATION_ATTEMPTS = 3;
@@ -36,6 +37,7 @@ export class WhatsappBotService {
     private readonly currencyRatesService: CurrencyRatesService,
     private readonly whatsappService: WhatsappService,
     private readonly usersService: UsersService,
+    private readonly mailService: MailService,
   ) {}
 
   /**
@@ -49,7 +51,7 @@ export class WhatsappBotService {
       });
 
       if (!collection) {
-        throw new BadRequestException('Collection not found');
+        throw new BadRequestException('Cobranza no encontrada');
       }
 
       const currency = 'USD';
@@ -113,7 +115,7 @@ export class WhatsappBotService {
     });
 
     if (!collection) {
-      throw new BadRequestException('Collection not found');
+      throw new BadRequestException('Cobranza no encontrada');
     }
 
     if (Number(collection.currentDebt) <= 0) {
@@ -378,7 +380,7 @@ export class WhatsappBotService {
       });
 
       if (!payment) {
-        throw new BadRequestException('Payment not found');
+        throw new BadRequestException('Pago no encontrado');
       }
 
       const collectionSend = payment.collectionSend;
@@ -526,25 +528,41 @@ export class WhatsappBotService {
   }
 
   private async notifySellerInvalidBankCredentials(user: User): Promise<void> {
-    const phone = user.phoneNumber?.trim();
-    if (!phone) {
-      this.logger.warn(
-        `Usuario ${user.id} con credenciales bancarias inválidas, pero no tiene teléfono para notificar.`,
-      );
-      return;
-    }
+    await this.mailService.sendAdminAlert(
+      `CobroFacil: credenciales bancarias inválidas — ${user.email}`,
+      [
+        'Un usuario tiene credenciales bancarias inválidas.',
+        '',
+        `Usuario ID: ${user.id}`,
+        `Email: ${user.email}`,
+        `Teléfono: ${user.phoneNumber?.trim() || 'No registrado'}`,
+        `Usuario banco: ${user.bankUsername?.trim() || 'N/A'}`,
+        '',
+        'Los pagos de este usuario quedarán en pausa hasta que actualice sus credenciales en la app.',
+      ].join('\n'),
+    );
 
-    try {
-      await this.whatsappService.sendTextMessage(
-        phone,
-        'Tus credenciales bancarias son inválidas. Debes cambiarlas para poder validar los pagos que recibas.',
-      );
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
-      this.logger.error(
-        `No se pudo notificar al usuario ${user.id} que sus credenciales bancarias son inválidas: ${message}`,
-      );
-    }
+    // Notificación directa al usuario por WhatsApp (texto libre): no funciona fuera de la
+    // ventana de 24h sin plantilla. Dejado comentado hasta tener un template aprobado.
+    // const phone = user.phoneNumber?.trim();
+    // if (!phone) {
+    //   this.logger.warn(
+    //     `Usuario ${user.id} con credenciales bancarias inválidas, pero no tiene teléfono para notificar.`,
+    //   );
+    //   return;
+    // }
+    //
+    // try {
+    //   await this.whatsappService.sendTextMessage(
+    //     phone,
+    //     'Tus credenciales bancarias son inválidas. Debes cambiarlas para poder validar los pagos que recibas.',
+    //   );
+    // } catch (error: unknown) {
+    //   const message = error instanceof Error ? error.message : String(error);
+    //   this.logger.error(
+    //     `No se pudo notificar al usuario ${user.id} que sus credenciales bancarias son inválidas: ${message}`,
+    //   );
+    // }
   }
 
   /**
@@ -642,7 +660,7 @@ export class WhatsappBotService {
     });
 
     if (!collectionSend) {
-      throw new BadRequestException('Collection send not found');
+      throw new BadRequestException('Envío de cobranza no encontrado');
     }
 
     const payment = this.paymentRepository.create({

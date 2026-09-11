@@ -43,7 +43,7 @@ export class WhatsappBotController {
     }
 
     this.logger.warn('Falló la verificación del webhook de WhatsApp.');
-    throw new ForbiddenException('Webhook verification failed.');
+    throw new ForbiddenException('Falló la verificación del webhook.');
   }
 
   /**
@@ -95,7 +95,7 @@ export class WhatsappBotController {
   async sendAutomaticReminders(@Param('daysOffset') daysOffset: string): Promise<{ sentCount: number }> {
     const offset = parseInt(daysOffset, 10);
     if (isNaN(offset)) {
-      throw new BadRequestException('Invalid daysOffset parameter');
+      throw new BadRequestException('Parámetro daysOffset inválido');
     }
 
     const count = await this.whatsappBotService.sendAutomaticReminders(offset);

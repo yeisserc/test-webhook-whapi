@@ -9,6 +9,7 @@ import { BankAutomationModule } from './bank-automation/bank-automation.module';
 import { ClientsModule } from './clients/clients.module';
 import { CollectionsModule } from './collections/collections.module';
 import { CurrencyRatesModule } from './currency-rates/currency-rates.module';
+import { MailModule } from './mail/mail.module';
 import { OpenaiExtractionModule } from './openai-extraction/openai-extraction.module';
 import { UsersModule } from './users/users.module';
 import { WhatsappBotModule } from './whatsapp-bot/whatsapp-bot.module';
@@ -50,6 +51,7 @@ import { WhatsappModule } from './whatsapp/whatsapp.module';
     OpenaiExtractionModule,
     WhatsappModule,
     WhatsappBotModule,
+    MailModule,
   ],
   controllers: [AppController],
   providers: [AppService],

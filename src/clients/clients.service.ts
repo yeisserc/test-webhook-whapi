@@ -38,7 +38,7 @@ export class ClientsService {
       relations: { user: true },
     });
     if (!client) {
-      throw new NotFoundException('Client not found.');
+      throw new NotFoundException('Cliente no encontrado.');
     }
 
     return client;
@@ -128,22 +128,22 @@ export class ClientsService {
     const countryCode = payload.countryCode?.trim();
 
     if (!firstName) {
-      throw new BadRequestException('First name is required.');
+      throw new BadRequestException('El nombre es obligatorio.');
     }
 
     if (!lastName) {
-      throw new BadRequestException('Last name is required.');
+      throw new BadRequestException('El apellido es obligatorio.');
     }
 
     const phoneCode = this.normalizePhoneCode(payload.phoneCode);
     const phoneNumber = payload.phoneNumber?.trim();
 
     if (!phoneCode) {
-      throw new BadRequestException('Phone code is required.');
+      throw new BadRequestException('El código de teléfono es obligatorio.');
     }
 
     if (!phoneNumber) {
-      throw new BadRequestException('Phone number is required.');
+      throw new BadRequestException('El número de teléfono es obligatorio.');
     }
 
     const client = this.clientsRepository.create({
@@ -170,7 +170,7 @@ export class ClientsService {
     if (payload.firstName !== undefined) {
       const firstName = payload.firstName.trim();
       if (!firstName) {
-        throw new BadRequestException('First name cannot be empty.');
+        throw new BadRequestException('El nombre no puede estar vacío.');
       }
       client.firstName = firstName;
     }
@@ -178,7 +178,7 @@ export class ClientsService {
     if (payload.lastName !== undefined) {
       const lastName = payload.lastName.trim();
       if (!lastName) {
-        throw new BadRequestException('Last name cannot be empty.');
+        throw new BadRequestException('El apellido no puede estar vacío.');
       }
       client.lastName = lastName;
     }
@@ -196,7 +196,7 @@ export class ClientsService {
     if (payload.phoneCode !== undefined) {
       const phoneCode = this.normalizePhoneCode(payload.phoneCode);
       if (!phoneCode) {
-        throw new BadRequestException('Phone code cannot be empty.');
+        throw new BadRequestException('El código de teléfono no puede estar vacío.');
       }
       client.phoneCode = phoneCode;
     }
@@ -204,7 +204,7 @@ export class ClientsService {
     if (payload.phoneNumber !== undefined) {
       const phoneNumber = payload.phoneNumber.trim();
       if (!phoneNumber) {
-        throw new BadRequestException('Phone number cannot be empty.');
+        throw new BadRequestException('El número de teléfono no puede estar vacío.');
       }
       client.phoneNumber = phoneNumber;
     }
@@ -217,19 +217,19 @@ export class ClientsService {
     await this.clientsRepository.remove(client);
 
     return {
-      message: 'Client deleted successfully.',
+      message: 'Cliente eliminado correctamente.',
       id,
     };
   }
 
   private async assertUserExists(userId: string) {
     if (!userId?.trim()) {
-      throw new BadRequestException('User id is required.');
+      throw new BadRequestException('El id de usuario es obligatorio.');
     }
 
     const exists = await this.usersRepository.exists({ where: { id: userId } });
     if (!exists) {
-      throw new BadRequestException('The provided user does not exist.');
+      throw new BadRequestException('El usuario indicado no existe.');
     }
   }
 
