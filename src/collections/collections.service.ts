@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { MoreThan, Raw, Repository } from 'typeorm';
 import { Client } from '../clients/entities/client.entity';
 import { User } from '../users/entities/user.entity';
 import { CreateCollectionDto } from './dto/create-collection.dto';
@@ -206,6 +206,10 @@ export class CollectionsService {
    */
   async getCollectionsDueInDays(daysOffset: number): Promise<Collection[]> {
     const collections = await this.collectionsRepository.find({
+      where: {
+        currentDebt: MoreThan(0),
+        currentInstallment: Raw((alias) => `${alias} <= installments`),
+      },
       relations: { client: true },
     });
 
