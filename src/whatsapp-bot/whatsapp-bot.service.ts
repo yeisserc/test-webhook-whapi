@@ -20,6 +20,12 @@ import { MailService } from '../mail/mail.service';
 
 const BANK_VERIFICATION_RETRY_MINUTES = 10;
 const MAX_BANK_VERIFICATION_ATTEMPTS = 3;
+
+const TEMPLATE_NAME_PAYMENT_REMINDER = 'is_payment_date_v2';
+const TEMPLATE_NAME_EARLY_REMINDER = 'two_days_for_payme_day';
+
+type TemplateName = typeof TEMPLATE_NAME_PAYMENT_REMINDER | typeof TEMPLATE_NAME_EARLY_REMINDER;
+
 @Injectable()
 export class WhatsappBotService {
   private readonly logger = new Logger(WhatsappBotService.name);
@@ -59,7 +65,10 @@ export class WhatsappBotService {
       const amountUsd = Number((collection.totalDebt / collection.installments).toFixed(2));
       const amountBs = Number((amountUsd * currencyRate).toFixed(2));
 
-      const templateName = dto.daysUntilPayment === 0 ? 'is_payment_date' : 'two_days_for_payme_day';
+      const templateName = dto.daysUntilPayment === 0 ?
+        TEMPLATE_NAME_PAYMENT_REMINDER :
+        TEMPLATE_NAME_EARLY_REMINDER;
+
       const bodyParameters = this.buildBodyParameters(
         collection,
         templateName,
@@ -709,7 +718,7 @@ export class WhatsappBotService {
 
   private buildBodyParameters(
     collection: Collection,
-    templateName: 'is_payment_date' | 'two_days_for_payme_day',
+    templateName: TemplateName,
     daysUntilPayment: number,
     amountUsd: number,
     amountBs: number,
@@ -718,13 +727,14 @@ export class WhatsappBotService {
     const clientName = `${collection.client.firstName} ${collection.client.lastName}`;
     const paymentDescription = collection.concept || 'Pago pendiente';
 
-    if (templateName === 'is_payment_date') {
+    if (templateName === TEMPLATE_NAME_PAYMENT_REMINDER) {
       return {
         client_name: clientName,
         current_date: currentDate,
         amount: amountUsd.toFixed(2) + '$',
         payment_description: paymentDescription,
         amount_bs: amountBs.toFixed(2) + ' Bs.',
+        installment: collection.currentInstallment.toString(),
       };
     }
 
