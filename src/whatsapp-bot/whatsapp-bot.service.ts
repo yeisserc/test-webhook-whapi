@@ -1,3 +1,6 @@
+import { randomUUID } from 'crypto';
+import { mkdir, writeFile } from 'fs/promises';
+import { join } from 'path';
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, LessThanOrEqual, Repository } from 'typeorm';
@@ -221,13 +224,11 @@ export class WhatsappBotService {
     try {
       let imageBuffer: Buffer;
       let mimeType = 'image/jpeg';
-      let screenshotUrl: string | null = media.mediaUrl ?? null;
 
       if (media.mediaId) {
         const downloaded = await this.whatsappService.downloadMedia(media.mediaId);
         imageBuffer = downloaded.buffer;
         mimeType = downloaded.mimeType;
-        screenshotUrl = media.mediaId;
       } else if (media.mediaUrl) {
         const imageResponse = await fetch(media.mediaUrl);
         const arrayBuffer = await imageResponse.arrayBuffer();
@@ -251,10 +252,12 @@ export class WhatsappBotService {
         throw new BadRequestException('No se encontró un envío de cobranza asociado');
       }
 
+      const screenshotUrl = await this.savePaymentScreenshot(imageBuffer, mimeType);
+
       await this.createPaymentRecord({
         collectionSendId: collectionSend.id,
         referenceNumber: extractedData.reference,
-        screenshotUrl: screenshotUrl ?? undefined,
+        screenshotUrl,
         amount: extractedData.amount,
         installmentNumber: collectionSend.installmentNumber,
       });
@@ -660,6 +663,26 @@ export class WhatsappBotService {
       .getOne();
 
     return collectionSend || null;
+  }
+
+  private async savePaymentScreenshot(imageBuffer: Buffer, mimeType: string): Promise<string> {
+    const extensionByMime: Record<string, string> = {
+      'image/jpeg': '.jpg',
+      'image/jpg': '.jpg',
+      'image/png': '.png',
+      'image/webp': '.webp',
+      'image/gif': '.gif',
+    };
+
+    const extension = extensionByMime[mimeType.toLowerCase()] ?? '.jpg';
+    const fileName = `${Date.now()}-${randomUUID()}${extension}`;
+    const relativeDirectory = join('uploads', 'payment-screenshots');
+    const absoluteDirectory = join(process.cwd(), relativeDirectory);
+
+    await mkdir(absoluteDirectory, { recursive: true });
+    await writeFile(join(absoluteDirectory, fileName), imageBuffer);
+
+    return `${relativeDirectory.replace(/\\/g, '/')}/${fileName}`;
   }
 
   private async createPaymentRecord(dto: ProcessPaymentDto): Promise<Payment> {

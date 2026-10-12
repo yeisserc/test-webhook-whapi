@@ -96,6 +96,7 @@ export class ClientsService {
               amount: payment.amount,
               installmentNumber: payment.installmentNumber,
               referenceNumber: payment.referenceNumber,
+              screenshotUrl: payment.screenshotUrl,
               status: payment.status,
               notes: payment.notes,
               createdAt: payment.createdAt,
