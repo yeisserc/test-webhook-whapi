@@ -20,6 +20,7 @@ import { WhatsappService } from '../whatsapp/whatsapp.service';
 import { UsersService } from '../users/users.service';
 import { User } from '../users/entities/user.entity';
 import { MailService } from '../mail/mail.service';
+import { WhatsappStatusGateway } from './whatsapp-status.gateway';
 
 const BANK_VERIFICATION_RETRY_MINUTES = 10;
 const MAX_BANK_VERIFICATION_ATTEMPTS = 3;
@@ -53,6 +54,7 @@ export class WhatsappBotService {
     private readonly whatsappService: WhatsappService,
     private readonly usersService: UsersService,
     private readonly mailService: MailService,
+    private readonly whatsappStatusGateway: WhatsappStatusGateway,
   ) {}
 
   /**
@@ -95,7 +97,7 @@ export class WhatsappBotService {
 
       // Solo registrar el envío el día de cobro (no el recordatorio de 2 días antes)
       if (dto.daysUntilPayment === 0) {
-        return this.collectionSendRepository.save(
+        const collectionSend = await this.collectionSendRepository.save(
           this.collectionSendRepository.create({
             collectionId: collection.id,
             collection,
@@ -110,6 +112,8 @@ export class WhatsappBotService {
             whatsappStatusAt: new Date(),
           }),
         );
+        this.publishWhatsappStatus(collectionSend, collection);
+        return collectionSend;
       }
 
       return null;
@@ -366,6 +370,7 @@ export class WhatsappBotService {
       collectionSend.whatsappStatusAt = incomingAt;
       collectionSend.whatsappError = this.whatsappStatusError(status);
       await this.collectionSendRepository.save(collectionSend);
+      this.publishWhatsappStatus(collectionSend);
       this.logger.warn(
         `Envío ${collectionSend.id} marcado como fallido: ${collectionSend.whatsappError ?? 'sin detalle'}`,
       );
@@ -382,7 +387,27 @@ export class WhatsappBotService {
     collectionSend.whatsappStatusAt = incomingAt;
     collectionSend.whatsappError = null;
     await this.collectionSendRepository.save(collectionSend);
+    this.publishWhatsappStatus(collectionSend);
     this.logger.log(`Envío ${collectionSend.id} actualizado a ${nextStatus}`);
+  }
+
+  private publishWhatsappStatus(collectionSend: CollectionSend, collection?: Collection): void {
+    const owner = collection ?? collectionSend.collection;
+    if (!owner?.userId || !owner.clientId) {
+      return;
+    }
+
+    this.whatsappStatusGateway.emitStatus({
+      userId: owner.userId,
+      clientId: owner.clientId,
+      collectionId: collectionSend.collectionId,
+      collectionSendId: collectionSend.id,
+      whatsappStatus: collectionSend.whatsappStatus,
+      whatsappStatusAt: collectionSend.whatsappStatusAt
+        ? new Date(collectionSend.whatsappStatusAt).toISOString()
+        : null,
+      whatsappError: collectionSend.whatsappError ?? null,
+    });
   }
 
   private parseWhatsappTimestamp(timestamp?: string): Date {
