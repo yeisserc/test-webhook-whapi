@@ -24,7 +24,20 @@ export type MetaWebhookValue = {
     wa_id?: string;
   }>;
   messages?: MetaWebhookMessage[];
-  statuses?: unknown[];
+  statuses?: MetaWebhookStatus[];
+};
+
+export type MetaWebhookStatus = {
+  id?: string;
+  status?: string;
+  timestamp?: string;
+  recipient_id?: string;
+  errors?: Array<{
+    code?: number;
+    title?: string;
+    message?: string;
+    error_data?: { details?: string };
+  }>;
 };
 
 export type MetaWebhookMessage = {

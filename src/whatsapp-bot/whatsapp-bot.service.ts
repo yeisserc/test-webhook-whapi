@@ -9,7 +9,7 @@ import { CollectionSend } from './entities/collection-send.entity';
 import { SendReminderDto } from './dto/send-reminder.dto';
 import { ReceiveMessageDto } from './dto/receive-message.dto';
 import { MetaWebhookPayload } from './dto/meta-webhook.dto';
-import type { MetaWebhookMessage } from './dto/meta-webhook.dto';
+import type { MetaWebhookMessage, MetaWebhookStatus } from './dto/meta-webhook.dto';
 import { ProcessPaymentDto } from './dto/process-payment.dto';
 import { Collection } from '../collections/entities/collection.entity';
 import { BankAutomationService, VerifyPaymentBancoDeVenezuelaRequest, VerifyPaymentRequest } from '../bank-automation/bank-automation.service';
@@ -26,6 +26,12 @@ const MAX_BANK_VERIFICATION_ATTEMPTS = 3;
 
 const TEMPLATE_NAME_PAYMENT_REMINDER = 'is_payment_date_v2';
 const TEMPLATE_NAME_EARLY_REMINDER = 'two_days_for_payme_day';
+
+const WHATSAPP_STATUS_RANK: Record<string, number> = {
+  sent: 1,
+  delivered: 2,
+  read: 3,
+};
 
 type TemplateName = typeof TEMPLATE_NAME_PAYMENT_REMINDER | typeof TEMPLATE_NAME_EARLY_REMINDER;
 
@@ -80,11 +86,12 @@ export class WhatsappBotService {
         amountBs,
       );
 
-      await this.whatsappService.sendTemplateMessage({
+      const sendResult = await this.whatsappService.sendTemplateMessage({
         to: dto.phoneNumber,
         templateName,
         bodyParameters,
       });
+      const whatsappMessageId = sendResult.messages?.[0]?.id ?? null;
 
       // Solo registrar el envío el día de cobro (no el recordatorio de 2 días antes)
       if (dto.daysUntilPayment === 0) {
@@ -98,6 +105,9 @@ export class WhatsappBotService {
             currencyRate,
             currency,
             installmentNumber: collection.currentInstallment,
+            whatsappMessageId,
+            whatsappStatus: 'sent',
+            whatsappStatusAt: new Date(),
           }),
         );
       }
@@ -180,9 +190,16 @@ export class WhatsappBotService {
       return;
     }
 
+    const statuses = this.extractStatusUpdates(payload);
+    for (const status of statuses) {
+      await this.applyWhatsappStatus(status);
+    }
+
     const messages = this.extractIncomingMessages(payload);
     if (messages.length === 0) {
-      this.logger.debug('Webhook de Meta sin mensajes entrantes (posible status update).');
+      if (statuses.length === 0) {
+        this.logger.debug('Webhook de Meta sin mensajes ni actualizaciones de estado.');
+      }
       return;
     }
 
@@ -284,6 +301,104 @@ export class WhatsappBotService {
 
       throw error;
     }
+  }
+
+  private extractStatusUpdates(payload: MetaWebhookPayload): MetaWebhookStatus[] {
+    const results: MetaWebhookStatus[] = [];
+
+    for (const entry of payload.entry ?? []) {
+      for (const change of entry.changes ?? []) {
+        if (change.field && change.field !== 'messages') {
+          continue;
+        }
+
+        for (const status of change.value?.statuses ?? []) {
+          if (status?.id && status.status) {
+            results.push(status);
+          }
+        }
+      }
+    }
+
+    return results;
+  }
+
+  /**
+   * Actualiza el estado de entrega de un envío sin retroceder
+   * (enviado → recibido → leído). Un fallo no pisa un mensaje ya entregado.
+   */
+  private async applyWhatsappStatus(status: MetaWebhookStatus): Promise<void> {
+    const messageId = status.id?.trim();
+    const nextStatus = status.status?.trim();
+    if (!messageId || !nextStatus) {
+      return;
+    }
+
+    if (!['sent', 'delivered', 'read', 'failed'].includes(nextStatus)) {
+      this.logger.debug(`Estado de WhatsApp ignorado: ${nextStatus} (${messageId})`);
+      return;
+    }
+
+    const collectionSend = await this.collectionSendRepository.findOne({
+      where: { whatsappMessageId: messageId },
+    });
+
+    if (!collectionSend) {
+      this.logger.debug(`Estado de WhatsApp sin envío asociado: ${nextStatus} (${messageId})`);
+      return;
+    }
+
+    const incomingAt = this.parseWhatsappTimestamp(status.timestamp);
+    if (
+      collectionSend.whatsappStatusAt &&
+      incomingAt.getTime() < collectionSend.whatsappStatusAt.getTime()
+    ) {
+      return;
+    }
+
+    if (nextStatus === 'failed') {
+      const current = collectionSend.whatsappStatus;
+      if (current === 'delivered' || current === 'read') {
+        return;
+      }
+
+      collectionSend.whatsappStatus = 'failed';
+      collectionSend.whatsappStatusAt = incomingAt;
+      collectionSend.whatsappError = this.whatsappStatusError(status);
+      await this.collectionSendRepository.save(collectionSend);
+      this.logger.warn(
+        `Envío ${collectionSend.id} marcado como fallido: ${collectionSend.whatsappError ?? 'sin detalle'}`,
+      );
+      return;
+    }
+
+    const currentRank = WHATSAPP_STATUS_RANK[collectionSend.whatsappStatus] ?? 0;
+    const nextRank = WHATSAPP_STATUS_RANK[nextStatus] ?? 0;
+    if (nextRank < currentRank) {
+      return;
+    }
+
+    collectionSend.whatsappStatus = nextStatus;
+    collectionSend.whatsappStatusAt = incomingAt;
+    collectionSend.whatsappError = null;
+    await this.collectionSendRepository.save(collectionSend);
+    this.logger.log(`Envío ${collectionSend.id} actualizado a ${nextStatus}`);
+  }
+
+  private parseWhatsappTimestamp(timestamp?: string): Date {
+    const seconds = Number(timestamp);
+    if (!Number.isFinite(seconds) || seconds <= 0) {
+      return new Date();
+    }
+    return new Date(seconds * 1000);
+  }
+
+  private whatsappStatusError(status: MetaWebhookStatus): string | null {
+    const error = status.errors?.[0];
+    if (!error) {
+      return null;
+    }
+    return error.error_data?.details || error.message || error.title || null;
   }
 
   private extractIncomingMessages(payload: MetaWebhookPayload): ReceiveMessageDto[] {
