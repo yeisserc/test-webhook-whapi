@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { WhatsappBotService } from './whatsapp-bot.service';
 import { WhatsappBotController } from './whatsapp-bot.controller';
 import { WhatsappBotSchedulerService } from './whatsapp-bot.scheduler';
+import { WhatsappStatusGateway } from './whatsapp-status.gateway';
 import { Payment } from './entities/payment.entity';
 import { CollectionSend } from './entities/collection-send.entity';
 import { Collection } from '../collections/entities/collection.entity';
@@ -27,7 +28,7 @@ import { MailModule } from '../mail/mail.module';
     MailModule,
   ],
   controllers: [WhatsappBotController],
-  providers: [WhatsappBotService, WhatsappBotSchedulerService],
+  providers: [WhatsappBotService, WhatsappBotSchedulerService, WhatsappStatusGateway],
   exports: [WhatsappBotService],
 })
 export class WhatsappBotModule {}
