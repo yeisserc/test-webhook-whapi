@@ -353,12 +353,8 @@ export class WhatsappBotService {
     }
 
     const incomingAt = this.parseWhatsappTimestamp(status.timestamp);
-    if (
-      collectionSend.whatsappStatusAt &&
-      incomingAt.getTime() < collectionSend.whatsappStatusAt.getTime()
-    ) {
-      return;
-    }
+    const currentRank = WHATSAPP_STATUS_RANK[collectionSend.whatsappStatus] ?? 0;
+    const nextRank = WHATSAPP_STATUS_RANK[nextStatus] ?? 0;
 
     if (nextStatus === 'failed') {
       const current = collectionSend.whatsappStatus;
@@ -377,9 +373,18 @@ export class WhatsappBotService {
       return;
     }
 
-    const currentRank = WHATSAPP_STATUS_RANK[collectionSend.whatsappStatus] ?? 0;
-    const nextRank = WHATSAPP_STATUS_RANK[nextStatus] ?? 0;
     if (nextRank < currentRank) {
+      return;
+    }
+
+    // Al crear el envío guardamos la hora local, que suele ser posterior al
+    // timestamp en segundos de Meta. Un estado más avanzado (sent → delivered
+    // → read) se acepta igual; la hora solo descarta repeticiones del mismo nivel.
+    if (
+      nextRank === currentRank &&
+      collectionSend.whatsappStatusAt &&
+      incomingAt.getTime() <= collectionSend.whatsappStatusAt.getTime()
+    ) {
       return;
     }
 
