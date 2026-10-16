@@ -91,6 +91,9 @@ export class ClientsService {
             amountUsd: send.amountUsd,
             amountBs: send.amountBs,
             currency: send.currency,
+            whatsappStatus: send.whatsappStatus ?? 'sent',
+            whatsappStatusAt: send.whatsappStatusAt ?? null,
+            whatsappError: send.whatsappError ?? null,
             payments: (paymentsBySendId[send.id] ?? []).map((payment) => ({
               id: payment.id,
               amount: payment.amount,

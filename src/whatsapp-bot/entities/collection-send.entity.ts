@@ -2,6 +2,7 @@ import {
   Column,
   CreateDateColumn,
   Entity,
+  Index,
   JoinColumn,
   ManyToOne,
   OneToMany,
@@ -67,6 +68,20 @@ export class CollectionSend {
 
   @Column({ name: 'installment_number', type: 'int' })
   installmentNumber!: number;
+
+  @Index({ unique: true })
+  @Column({ name: 'whatsapp_message_id', type: 'varchar', length: 128, nullable: true })
+  whatsappMessageId?: string | null;
+
+  /** sent | delivered | read | failed */
+  @Column({ name: 'whatsapp_status', type: 'varchar', length: 20, default: 'sent' })
+  whatsappStatus!: string;
+
+  @Column({ name: 'whatsapp_status_at', type: 'timestamptz', nullable: true })
+  whatsappStatusAt?: Date | null;
+
+  @Column({ name: 'whatsapp_error', type: 'text', nullable: true })
+  whatsappError?: string | null;
 
   @OneToMany(() => Payment, (payment) => payment.collectionSend)
   payments!: Payment[];
