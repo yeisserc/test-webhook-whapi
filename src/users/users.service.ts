@@ -8,6 +8,7 @@ import { RegisterUserDto } from './dto/register-user.dto';
 import { UpdateBankAccountDto } from './dto/update-bank-account.dto';
 import type { UpdateUserDto } from './dto/update-user.dto';
 import { User } from './entities/user.entity';
+import { PaymentBank } from './payment-bank.enum';
 
 const SALT_ROUNDS = 10;
 
@@ -66,6 +67,10 @@ export class UsersService {
       bankUsername: null,
       bankPassword: null,
       validBankCredentials: false,
+      companyName: null,
+      paymentDocument: null,
+      paymentPhoneNumber: null,
+      paymentBank: null,
     });
 
     const saved = await this.usersRepository.save(user);
@@ -127,6 +132,10 @@ export class UsersService {
       bankUsername,
       bankPassword,
       validBankCredentials,
+      companyName: this.normalizeOptionalText(payload.companyName),
+      paymentDocument: this.normalizeOptionalText(payload.paymentDocument),
+      paymentPhoneNumber: this.normalizeOptionalText(payload.paymentPhoneNumber),
+      paymentBank: this.parsePaymentBank(payload.paymentBank),
     });
 
     const saved = await this.usersRepository.save(user);
@@ -213,6 +222,22 @@ export class UsersService {
       user.validBankCredentials = true;
     }
 
+    if (payload.companyName !== undefined) {
+      user.companyName = this.normalizeOptionalText(payload.companyName);
+    }
+
+    if (payload.paymentDocument !== undefined) {
+      user.paymentDocument = this.normalizeOptionalText(payload.paymentDocument);
+    }
+
+    if (payload.paymentPhoneNumber !== undefined) {
+      user.paymentPhoneNumber = this.normalizeOptionalText(payload.paymentPhoneNumber);
+    }
+
+    if (payload.paymentBank !== undefined) {
+      user.paymentBank = this.parsePaymentBank(payload.paymentBank);
+    }
+
     const saved = await this.usersRepository.save(user);
     return this.toPublicUser(saved);
   }
@@ -241,5 +266,24 @@ export class UsersService {
 
   private isValidEmail(email: string) {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  }
+
+  private normalizeOptionalText(value?: string | null): string | null {
+    const trimmed = value?.trim() ?? '';
+    return trimmed || null;
+  }
+
+  private parsePaymentBank(value?: string | null): PaymentBank | null {
+    const trimmed = value?.trim() ?? '';
+    if (!trimmed) {
+      return null;
+    }
+
+    const allowed = Object.values(PaymentBank) as string[];
+    if (!allowed.includes(trimmed)) {
+      throw new BadRequestException('El banco de pago no es válido.');
+    }
+
+    return trimmed as PaymentBank;
   }
 }

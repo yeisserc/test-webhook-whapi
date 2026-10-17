@@ -19,6 +19,7 @@ import { CurrencyRatesService } from '../currency-rates/currency-rates.service';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
 import { UsersService } from '../users/users.service';
 import { User } from '../users/entities/user.entity';
+import { PAYMENT_BANK_LABELS } from '../users/payment-bank.enum';
 import { MailService } from '../mail/mail.service';
 import { WhatsappStatusGateway } from './whatsapp-status.gateway';
 
@@ -64,7 +65,7 @@ export class WhatsappBotService {
     try {
       const collection = await this.collectionRepository.findOne({
         where: { id: dto.collectionId },
-        relations: { client: true },
+        relations: { client: true, user: true },
       });
 
       if (!collection) {
@@ -896,6 +897,19 @@ export class WhatsappBotService {
     const paymentDescription = collection.concept || 'Pago pendiente';
 
     if (templateName === TEMPLATE_NAME_PAYMENT_REMINDER) {
+      const companyName = collection.user?.companyName?.trim() ?? '';
+      const paymentDocument = collection.user?.paymentDocument?.trim() ?? '';
+      const paymentPhoneNumber = collection.user?.paymentPhoneNumber?.trim() ?? '';
+      const paymentBankName = collection.user?.paymentBank
+        ? PAYMENT_BANK_LABELS[collection.user.paymentBank]
+        : '';
+
+      if (!companyName || !paymentDocument || !paymentPhoneNumber || !paymentBankName) {
+        throw new BadRequestException(
+          'Configura el nombre de la empresa y los datos de pago antes de enviar el cobro.',
+        );
+      }
+
       return {
         client_name: clientName,
         current_date: currentDate,
@@ -903,6 +917,10 @@ export class WhatsappBotService {
         payment_description: paymentDescription,
         amount_bs: amountBs.toFixed(2) + ' Bs.',
         installment: collection.currentInstallment.toString(),
+        company_name: companyName,
+        payment_document: paymentDocument,
+        payment_phone_number: paymentPhoneNumber,
+        payment_bank_name: paymentBankName,
       };
     }
 
