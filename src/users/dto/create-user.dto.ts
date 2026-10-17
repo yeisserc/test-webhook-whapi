@@ -4,4 +4,8 @@ export class CreateUserDto {
   phoneNumber?: string;
   bankUsername?: string;
   bankPassword?: string;
+  companyName?: string;
+  paymentDocument?: string;
+  paymentPhoneNumber?: string;
+  paymentBank?: string;
 }
