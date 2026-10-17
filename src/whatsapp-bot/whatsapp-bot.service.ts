@@ -26,7 +26,7 @@ import { WhatsappStatusGateway } from './whatsapp-status.gateway';
 const BANK_VERIFICATION_RETRY_MINUTES = 10;
 const MAX_BANK_VERIFICATION_ATTEMPTS = 3;
 
-const TEMPLATE_NAME_PAYMENT_REMINDER = 'is_payment_date_v2';
+const TEMPLATE_NAME_PAYMENT_REMINDER = 'is_payment_date_v3';
 const TEMPLATE_NAME_EARLY_REMINDER = 'two_days_for_payme_day';
 
 const WHATSAPP_STATUS_RANK: Record<string, number> = {
