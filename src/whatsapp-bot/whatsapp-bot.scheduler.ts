@@ -1,12 +1,36 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { WhatsappBotService } from './whatsapp-bot.service';
 
 @Injectable()
 export class WhatsappBotSchedulerService {
   private readonly logger = new Logger(WhatsappBotSchedulerService.name);
+  private readonly paymentVerificationEnabled: boolean;
+  private readonly paymentDueRemindersEnabled: boolean;
 
-  constructor(private readonly whatsappBotService: WhatsappBotService) {}
+  constructor(
+    private readonly whatsappBotService: WhatsappBotService,
+    private readonly configService: ConfigService,
+  ) {
+    this.paymentVerificationEnabled = this.isEnabled('VERIFY_PENDING_PAYMENTS');
+    this.paymentDueRemindersEnabled = this.isEnabled('SEND_PAYMENT_DUE_REMINDERS');
+    this.logger.log(
+      this.paymentVerificationEnabled
+        ? 'Verificación automática de pagos activada.'
+        : 'Verificación automática de pagos desactivada (VERIFY_PENDING_PAYMENTS=false).',
+    );
+    this.logger.log(
+      this.paymentDueRemindersEnabled
+        ? 'Recordatorios del día de cobro activados.'
+        : 'Recordatorios del día de cobro desactivados (SEND_PAYMENT_DUE_REMINDERS=false).',
+    );
+  }
+
+  private isEnabled(name: string): boolean {
+    const value = this.configService.get<string>(name, 'true')?.trim().toLowerCase();
+    return value !== 'false';
+  }
 
   /**
    * Envía recordatorios 2 días antes de la fecha de cobro
@@ -31,6 +55,10 @@ export class WhatsappBotSchedulerService {
     timeZone: 'America/Caracas',
   })
   async sendPaymentDueReminders(): Promise<void> {
+    if (!this.paymentDueRemindersEnabled) {
+      return;
+    }
+
     try {
       this.logger.debug('Enviando recordatorios de cobranza del día...');
       const count = await this.whatsappBotService.sendAutomaticReminders(0);
@@ -50,6 +78,10 @@ export class WhatsappBotSchedulerService {
     timeZone: 'America/Caracas',
   })
   async verifyPendingPayments(): Promise<void> {
+    if (!this.paymentVerificationEnabled) {
+      return;
+    }
+
     try {
       this.logger.debug('Verificando pagos pendientes...');
       const pendingPayments = await this.whatsappBotService.getPendingPayments();
