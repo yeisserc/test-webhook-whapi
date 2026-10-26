@@ -55,7 +55,7 @@ export class WhatsappService {
     const template: Record<string, unknown> = {
       name: dto.templateName,
       language: {
-        code: dto.languageCode ?? 'en',
+        code: dto.languageCode ?? 'es',
       },
     };
 

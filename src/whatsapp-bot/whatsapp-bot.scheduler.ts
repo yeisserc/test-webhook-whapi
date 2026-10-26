@@ -84,18 +84,7 @@ export class WhatsappBotSchedulerService {
 
     try {
       this.logger.debug('Verificando pagos pendientes...');
-      const pendingPayments = await this.whatsappBotService.getPendingPayments();
-
-      for (const payment of pendingPayments) {
-        try {
-          await this.whatsappBotService.verifyAndConfirmPayment(payment.id);
-        } catch (error: unknown) {
-          const message = error instanceof Error ? error.message : String(error);
-          this.logger.error(`Error verificando pago ${payment.id}: ${message}`);
-        }
-      }
-
-      this.logger.log(`${pendingPayments.length} pagos pendientes procesados en este ciclo`);
+      await this.whatsappBotService.verifyPendingPaymentsBatch();
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       this.logger.error(`Error en verifyPendingPayments: ${message}`);
