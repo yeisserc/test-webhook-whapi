@@ -12,7 +12,7 @@ import { MetaWebhookPayload } from './dto/meta-webhook.dto';
 import type { MetaWebhookMessage, MetaWebhookStatus } from './dto/meta-webhook.dto';
 import { ProcessPaymentDto } from './dto/process-payment.dto';
 import { Collection } from '../collections/entities/collection.entity';
-import { BankAutomationService, VerifyPaymentBancoDeVenezuelaRequest, VerifyPaymentRequest } from '../bank-automation/bank-automation.service';
+import { BankAutomationService } from '../bank-automation/bank-automation.service';
 import { OpenaiExtractionService } from '../openai-extraction/openai-extraction.service';
 import { CollectionsService } from '../collections/collections.service';
 import { CurrencyRatesService } from '../currency-rates/currency-rates.service';
@@ -26,7 +26,7 @@ import { WhatsappStatusGateway } from './whatsapp-status.gateway';
 const BANK_VERIFICATION_RETRY_MINUTES = 10;
 const MAX_BANK_VERIFICATION_ATTEMPTS = 3;
 
-const TEMPLATE_NAME_PAYMENT_REMINDER = 'is_payment_date_v3';
+const TEMPLATE_NAME_PAYMENT_REMINDER = 'is_payment_date_v4';
 const TEMPLATE_NAME_EARLY_REMINDER = 'two_days_for_payme_day';
 
 const WHATSAPP_STATUS_RANK: Record<string, number> = {
@@ -40,6 +40,7 @@ type TemplateName = typeof TEMPLATE_NAME_PAYMENT_REMINDER | typeof TEMPLATE_NAME
 @Injectable()
 export class WhatsappBotService {
   private readonly logger = new Logger(WhatsappBotService.name);
+  private verificationCycleRunning = false;
 
   constructor(
     @InjectRepository(Payment)
@@ -524,6 +525,41 @@ export class WhatsappBotService {
   }
 
   /**
+   * Verifica los pagos pendientes de cada cuenta en una sola sesión de banco.
+   * Si el ciclo anterior sigue abierto, este no arranca.
+   */
+  async verifyPendingPaymentsBatch(): Promise<number> {
+    if (this.verificationCycleRunning) {
+      this.logger.warn('Verificación bancaria ya en curso. Se omite este ciclo.');
+      return 0;
+    }
+
+    this.verificationCycleRunning = true;
+    try {
+      const pendingPayments = await this.getPendingPayments();
+      const groups = new Map<string, Payment[]>();
+
+      for (const payment of pendingPayments) {
+        const userId = payment.collectionSend?.collection?.user?.id;
+        if (!userId) continue;
+        const group = groups.get(userId) ?? [];
+        group.push(payment);
+        groups.set(userId, group);
+      }
+
+      let processed = 0;
+      for (const payments of groups.values()) {
+        processed += await this.verifyUserPaymentsInOneSession(payments);
+      }
+
+      this.logger.log(`${processed} pagos pendientes procesados en este ciclo`);
+      return processed;
+    } finally {
+      this.verificationCycleRunning = false;
+    }
+  }
+
+  /**
    * Verifica y confirma un pago
    */
   async verifyAndConfirmPayment(paymentId: string): Promise<void> {
@@ -576,7 +612,7 @@ export class WhatsappBotService {
         return;
       }
 
-      const verifyPayload: VerifyPaymentBancoDeVenezuelaRequest = {
+      const result = await this.bankAutomationService.verifyPaymentBDV({
         credentials: {
           username: user.bankUsername!.trim(),
           password: user.bankPassword!.trim(),
@@ -585,90 +621,205 @@ export class WhatsappBotService {
           amount: payment.amount,
           reference: payment.referenceNumber?.slice(-6) ?? '',
         },
-      };
-      const result = await this.bankAutomationService.verifyPaymentBDV(verifyPayload);
+      });
+
+      if (result?.passwordExpired) {
+        await this.pausePaymentsForExpiredBankPassword(user, [payment]);
+        return;
+      }
 
       if (result?.invalidCredentials) {
-        if (user.id) {
-          await this.usersService.markBankCredentialsInvalid(user.id);
-        }
-        payment.notes = 'Verificación en pausa: credenciales bancarias inválidas';
-        await this.paymentRepository.save(payment);
-        await this.notifySellerInvalidBankCredentials(user);
-        this.logger.warn(
-          `Credenciales bancarias inválidas para el usuario ${user.id}. Pago ${payment.id} en pausa.`,
-        );
+        await this.pausePaymentsForInvalidBankCredentials(user, [payment]);
         return;
       }
 
-      const attempts = (payment.verificationAttempts ?? 0) + 1;
-      payment.verificationAttempts = attempts;
-
-      // Error técnico del banco (timeout, página no carga, etc.): reintentar más tarde
-      if (result?.isTechnicalError) {
-        if (attempts >= MAX_BANK_VERIFICATION_ATTEMPTS) {
-          payment.status = 'rejected';
-          payment.nextVerificationAt = null;
-          payment.notes = `No se pudo consultar el banco tras ${attempts} intentos: ${result.error}`;
-          await this.paymentRepository.save(payment);
-          await this.notifyClientPaymentResult(
-            payment,
-            'No pudimos validar tu pago. Por favor ponte en contacto con tu vendedor.',
-          );
-          return;
-        }
-
-        payment.status = 'pending';
-        payment.nextVerificationAt = new Date(
-          Date.now() + attempts * BANK_VERIFICATION_RETRY_MINUTES * 60 * 1000,
-        );
-        payment.notes = `Reintento programado (${attempts}/${MAX_BANK_VERIFICATION_ATTEMPTS}): ${result.error}`;
-        await this.paymentRepository.save(payment);
-        this.logger.warn(
-          `Error técnico verificando pago ${payment.id}. Reintento #${attempts} en ${BANK_VERIFICATION_RETRY_MINUTES} min.`,
-        );
-        return;
-      }
-
-      const isVerified = result?.movementIsCorrect ?? false;
-
-      if (!isVerified) {
-        // Banco respondió bien pero el movimiento no existe / no coincide: no reintentar
-        console.log('Payment not verified');
-        payment.status = 'rejected';
-        payment.nextVerificationAt = null;
-        payment.notes = 'No se pudo validar el pago en el banco';
-
-        await this.notifyClientPaymentResult(
-          payment,
-          'No pudimos validar tu pago. Por favor ponte en contacto con tu vendedor.',
-        );
-      } else {
-        console.log('Payment verified');
-        payment.status = 'verified';
-        payment.verifiedAt = new Date();
-        payment.nextVerificationAt = null;
-
-        await this.updateCollectionPayment(
-          collectionSend.collection.id,
-          payment.installmentNumber,
-          Number(collectionSend.amountUsd),
-        );
-
-        await this.notifyClientPaymentResult(
-          payment,
-          'Tu pago fue verificado exitosamente. ¡Gracias!',
-        );
-
-        this.logger.log(`Pago verificado: ${payment.referenceNumber}`);
-      }
-
-      await this.paymentRepository.save(payment);
+      await this.applyBankVerificationResult(payment, result);
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       this.logger.error(`Error verificando pago: ${message}`);
       throw error;
     }
+  }
+
+  private async verifyUserPaymentsInOneSession(payments: Payment[]): Promise<number> {
+    const ready: Payment[] = [];
+
+    for (const payment of payments) {
+      if (await this.paymentIsReadyForBank(payment)) {
+        ready.push(payment);
+      }
+    }
+
+    if (ready.length === 0) {
+      return payments.length;
+    }
+
+    const user = ready[0].collectionSend.collection.user;
+    this.logger.log(
+      `Verificando ${ready.length} pago(s) del usuario ${user.id} en una sola sesión bancaria.`,
+    );
+
+    const results = await this.bankAutomationService.verifyPaymentsBDV({
+      credentials: {
+        username: user.bankUsername!.trim(),
+        password: user.bankPassword!.trim(),
+      },
+      payments: ready.map((payment) => ({
+        id: payment.id,
+        amount: payment.amount,
+        reference: payment.referenceNumber?.slice(-6) ?? '',
+      })),
+    });
+    const resultById = new Map(results.map((result) => [result.id, result]));
+
+    if (results.some((result) => result.passwordExpired)) {
+      await this.pausePaymentsForExpiredBankPassword(user, ready);
+      return payments.length;
+    }
+
+    if (results.some((result) => result.invalidCredentials)) {
+      await this.pausePaymentsForInvalidBankCredentials(user, ready);
+      return payments.length;
+    }
+
+    for (const payment of ready) {
+      const result = resultById.get(payment.id) ?? {
+        error: 'La verificación no devolvió resultado para este pago.',
+        isTechnicalError: true,
+        movementIsCorrect: false,
+      };
+      await this.applyBankVerificationResult(payment, result);
+    }
+
+    return payments.length;
+  }
+
+  /** Rechaza el pago si no se puede consultar, o lo deja listo para la sesión del banco. */
+  private async paymentIsReadyForBank(payment: Payment): Promise<boolean> {
+    const collectionSend = payment.collectionSend;
+    if (!collectionSend) {
+      payment.status = 'rejected';
+      payment.notes = 'No se encontró un envío de cobranza asociado a este pago';
+      await this.paymentRepository.save(payment);
+      return false;
+    }
+
+    const paymentAmount = Number(Number(payment.amount).toFixed(2));
+    const expectedAmountBs = Number(Number(collectionSend.amountBs).toFixed(2));
+    const difference = Number(Math.abs(paymentAmount - expectedAmountBs).toFixed(2));
+
+    if (difference > 0.01) {
+      payment.status = 'rejected';
+      payment.notes = `El monto del pago (${paymentAmount}) no coincide con el monto cobrado (${expectedAmountBs} Bs)`;
+      await this.paymentRepository.save(payment);
+      await this.notifyClientPaymentResult(
+        payment,
+        'No pudimos validar tu pago. Por favor ponte en contacto con tu vendedor.',
+      );
+      return false;
+    }
+
+    return this.canVerifyUserBank(collectionSend.collection?.user);
+  }
+
+  private async pausePaymentsForExpiredBankPassword(user: User, payments: Payment[]): Promise<void> {
+    if (user.id) {
+      await this.usersService.markBankCredentialsInvalid(user.id);
+    }
+
+    for (const payment of payments) {
+      payment.notes = 'Verificación en pausa: la contraseña del banco está vencida';
+      await this.paymentRepository.save(payment);
+    }
+
+    await this.mailService.sendAdminAlert(
+      `CobroFacil: contraseña bancaria vencida — ${user.email}`,
+      `El usuario con correo ${user.email} tiene la contraseña vencida.`,
+    );
+    this.logger.warn(
+      `Contraseña bancaria vencida para el usuario ${user.email}. ${payments.length} pago(s) en pausa.`,
+    );
+  }
+
+  private async pausePaymentsForInvalidBankCredentials(user: User, payments: Payment[]): Promise<void> {
+    if (user.id) {
+      await this.usersService.markBankCredentialsInvalid(user.id);
+    }
+
+    for (const payment of payments) {
+      payment.notes = 'Verificación en pausa: credenciales bancarias inválidas';
+      await this.paymentRepository.save(payment);
+    }
+
+    await this.notifySellerInvalidBankCredentials(user);
+    this.logger.warn(
+      `Credenciales bancarias inválidas para el usuario ${user.id}. ${payments.length} pago(s) en pausa.`,
+    );
+  }
+
+  private async applyBankVerificationResult(
+    payment: Payment,
+    result: {
+      error: string;
+      isTechnicalError: boolean;
+      movementIsCorrect: boolean;
+    },
+  ): Promise<void> {
+    const collectionSend = payment.collectionSend;
+    const attempts = (payment.verificationAttempts ?? 0) + 1;
+    payment.verificationAttempts = attempts;
+
+    if (result.isTechnicalError) {
+      if (attempts >= MAX_BANK_VERIFICATION_ATTEMPTS) {
+        payment.status = 'rejected';
+        payment.nextVerificationAt = null;
+        payment.notes = `No se pudo consultar el banco tras ${attempts} intentos: ${result.error}`;
+        await this.paymentRepository.save(payment);
+        await this.notifyClientPaymentResult(
+          payment,
+          'No pudimos validar tu pago. Por favor ponte en contacto con tu vendedor.',
+        );
+        return;
+      }
+
+      payment.status = 'pending';
+      payment.nextVerificationAt = new Date(
+        Date.now() + attempts * BANK_VERIFICATION_RETRY_MINUTES * 60 * 1000,
+      );
+      payment.notes = `Reintento programado (${attempts}/${MAX_BANK_VERIFICATION_ATTEMPTS}): ${result.error}`;
+      await this.paymentRepository.save(payment);
+      this.logger.warn(
+        `Error técnico verificando pago ${payment.id}. Reintento #${attempts} en ${BANK_VERIFICATION_RETRY_MINUTES} min.`,
+      );
+      return;
+    }
+
+    if (!result.movementIsCorrect) {
+      payment.status = 'rejected';
+      payment.nextVerificationAt = null;
+      payment.notes = 'No se pudo validar el pago en el banco';
+      await this.notifyClientPaymentResult(
+        payment,
+        'No pudimos validar tu pago. Por favor ponte en contacto con tu vendedor.',
+      );
+    } else {
+      payment.status = 'verified';
+      payment.verifiedAt = new Date();
+      payment.nextVerificationAt = null;
+
+      await this.updateCollectionPayment(
+        collectionSend.collection.id,
+        payment.installmentNumber,
+        Number(collectionSend.amountUsd),
+      );
+      await this.notifyClientPaymentResult(
+        payment,
+        'Tu pago fue verificado exitosamente. ¡Gracias!',
+      );
+      this.logger.log(`Pago verificado: ${payment.referenceNumber}`);
+    }
+
+    await this.paymentRepository.save(payment);
   }
 
   private async notifyClientPaymentResult(payment: Payment, message: string): Promise<void> {
