@@ -7,6 +7,8 @@ import { CreateCollectionDto } from './dto/create-collection.dto';
 import type { UpdateCollectionDto } from './dto/update-collection.dto';
 import { Collection } from './entities/collection.entity';
 
+const LAST_MONTH_COLLECTION_DAY = 'ultimo';
+
 @Injectable()
 export class CollectionsService {
   constructor(
@@ -63,7 +65,7 @@ export class CollectionsService {
       installments: Number(payload.installments),
       currentInstallment: 1,
       frequency: payload.frequency.trim(),
-      collectionDay: payload.collectionDay?.trim() || null,
+      collectionDay: this.normalizeCollectionDay(payload.frequency, payload.collectionDay),
       concept: payload.concept.trim(),
     });
 
@@ -110,6 +112,8 @@ export class CollectionsService {
     if (payload.collectionDay !== undefined) {
       collection.collectionDay = payload.collectionDay.trim() || null;
     }
+
+    collection.collectionDay = this.normalizeCollectionDay(collection.frequency, collection.collectionDay);
 
     if (payload.concept !== undefined) {
       const concept = payload.concept.trim();
@@ -159,12 +163,75 @@ export class CollectionsService {
     }
   }
 
+  private normalizeCollectionDay(
+    frequency: string | undefined,
+    collectionDay: string | null | undefined,
+  ): string | null {
+    const day = collectionDay?.trim() || null;
+    if (!day) {
+      return null;
+    }
+
+    if (frequency?.trim() === 'Mensual' && day.toLowerCase() === LAST_MONTH_COLLECTION_DAY) {
+      return LAST_MONTH_COLLECTION_DAY;
+    }
+
+    if (frequency?.trim() === 'Quincenal') {
+      const parsed = this.parseQuincenalDays(day);
+      if (parsed) {
+        const second = parsed.secondIsLastDay ? LAST_MONTH_COLLECTION_DAY : String(parsed.day2);
+        return `${parsed.day1},${second}`;
+      }
+    }
+
+    return day;
+  }
+
+  private parseQuincenalDays(
+    collectionDay: string,
+  ): { day1: number; day2: number; secondIsLastDay: boolean } | null {
+    const parts = collectionDay
+      .split(',')
+      .map((part) => part.trim())
+      .filter(Boolean);
+    if (parts.length !== 2) {
+      return null;
+    }
+
+    const lastIndex = parts.findIndex((part) => part.toLowerCase() === LAST_MONTH_COLLECTION_DAY);
+    if (lastIndex >= 0) {
+      const numeric = parts[lastIndex === 0 ? 1 : 0];
+      const day1 = Number(numeric);
+      if (!Number.isInteger(day1) || day1 < 1 || day1 > 15 || String(day1) !== numeric) {
+        return null;
+      }
+      return { day1, day2: 0, secondIsLastDay: true };
+    }
+
+    const numbers = parts.map((part) => Number(part));
+    if (numbers.some((day, index) => !Number.isInteger(day) || String(day) !== parts[index])) {
+      return null;
+    }
+
+    const [day1, day2] = [...numbers].sort((left, right) => left - right);
+    if (day1 < 1 || day1 > 15 || day2 < 16 || day2 > 28) {
+      return null;
+    }
+
+    return { day1, day2, secondIsLastDay: false };
+  }
+
+  private lastDayOfMonth(date: Date): number {
+    return new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+  }
+
   private validatePayload(payload: {
     totalDebt: number;
     currentDebt: number;
     installments: number;
     currentInstallment: number;
     frequency: string;
+    collectionDay?: string | null;
   }) {
     if (!Number.isFinite(Number(payload.totalDebt)) || Number(payload.totalDebt) < 0) {
       throw new BadRequestException('La deuda total debe ser un número mayor o igual a 0.');
@@ -191,8 +258,26 @@ export class CollectionsService {
     }
 
     const freq = payload.frequency.trim();
-    if (freq !== 'Manual' && !(payload as { collectionDay?: string | null }).collectionDay?.trim()) {
+    const collectionDay = payload.collectionDay?.trim() ?? '';
+    if (freq !== 'Manual' && !collectionDay) {
       throw new BadRequestException('El día de cobro es obligatorio para la frecuencia seleccionada.');
+    }
+
+    if (freq === 'Quincenal' && collectionDay && !this.parseQuincenalDays(collectionDay)) {
+      throw new BadRequestException(
+        'La cobranza quincenal usa un día entre 1 y 15 y otro entre 16 y 28, o el último del mes.',
+      );
+    }
+
+    if (freq === 'Mensual' && collectionDay) {
+      const isLastDay = collectionDay.toLowerCase() === LAST_MONTH_COLLECTION_DAY;
+      const paymentDay = Number(collectionDay);
+      const isDayOfMonth = Number.isInteger(paymentDay) && paymentDay >= 1 && paymentDay <= 28 && String(paymentDay) === collectionDay;
+      if (!isLastDay && !isDayOfMonth) {
+        throw new BadRequestException(
+          'El día de cobro mensual debe estar entre 1 y 28, o ser el último del mes.',
+        );
+      }
     }
 
     if (!(payload as { concept?: string | null }).concept?.trim()) {
@@ -261,38 +346,42 @@ export class CollectionsService {
     }
 
     if (collection.frequency === 'Quincenal' && collection.collectionDay) {
-      const [day1, day2] = collection.collectionDay
-        .split(',')
-        .map((day) => Number(day.trim()))
-        .sort((a, b) => a - b);
-
-      if (!Number.isFinite(day1) || !Number.isFinite(day2)) {
+      const parsed = this.parseQuincenalDays(collection.collectionDay);
+      if (!parsed) {
         return null;
       }
 
       const currentDay = ref.getDate();
+      const secondDay = parsed.secondIsLastDay ? this.lastDayOfMonth(ref) : parsed.day2;
 
-      if (currentDay === day1 || currentDay === day2) {
+      if (currentDay === parsed.day1 || currentDay === secondDay) {
         return ref;
       }
 
       const nextDate = new Date(ref);
 
-      if (currentDay < day1) {
-        nextDate.setDate(day1);
-      } else if (currentDay < day2) {
-        nextDate.setDate(day2);
+      if (currentDay < parsed.day1) {
+        nextDate.setDate(parsed.day1);
+      } else if (currentDay < secondDay) {
+        nextDate.setDate(secondDay);
       } else {
+        nextDate.setDate(1);
         nextDate.setMonth(nextDate.getMonth() + 1);
-        nextDate.setDate(day1);
+        nextDate.setDate(parsed.day1);
       }
 
       return nextDate;
     }
 
     if (collection.frequency === 'Mensual' && collection.collectionDay) {
+      if (collection.collectionDay.trim().toLowerCase() === LAST_MONTH_COLLECTION_DAY) {
+        const nextDate = new Date(ref);
+        nextDate.setMonth(nextDate.getMonth() + 1, 0);
+        return nextDate;
+      }
+
       const paymentDay = Number(collection.collectionDay);
-      if (!Number.isFinite(paymentDay)) {
+      if (!Number.isInteger(paymentDay) || paymentDay < 1 || paymentDay > 28) {
         return null;
       }
 
