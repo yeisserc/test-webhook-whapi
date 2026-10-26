@@ -30,6 +30,10 @@ const TEMPLATE_NAME_PAYMENT_REMINDER = 'is_payment_date_v4';
 const TEMPLATE_NAME_EARLY_REMINDER = 'two_days_for_payme_day';
 const TEMPLATE_NAME_RECEIVED_PAYMENT = 'received_payment';
 
+const SCREENSHOT_ONLY_REPLY = `📸 Para validar tu pago, por favor envía únicamente una imagen o captura del comprobante de pago por este chat.
+
+No envíes texto ni otros archivos. ¡Gracias! 🙌`;
+
 const WHATSAPP_STATUS_RANK: Record<string, number> = {
   sent: 1,
   delivered: 2,
@@ -210,31 +214,54 @@ export class WhatsappBotService {
       return;
     }
 
-    for (const message of messages) {
-      await this.handleIncomingMessage(message);
-    }
+    await this.handleIncomingMessages(messages);
   }
 
   /**
-   * Procesa un mensaje entrante de WhatsApp
+   * Revisa juntos los mensajes de un mismo aviso.
+   * Si alguno trae imagen, se procesan las capturas y no se responde al texto.
+   * Si ninguno trae imagen, se envía un solo aviso pidiendo la captura.
    */
-  async handleIncomingMessage(dto: ReceiveMessageDto): Promise<void> {
-    try {
-      this.logger.log(
-        `Mensaje recibido de ${dto.phoneNumber} (type=${dto.mediaType ?? 'text'}, id=${dto.messageId ?? 'n/a'})`,
+  private async handleIncomingMessages(messages: ReceiveMessageDto[]): Promise<void> {
+    const byPhone = new Map<string, ReceiveMessageDto[]>();
+    for (const message of messages) {
+      const group = byPhone.get(message.phoneNumber) ?? [];
+      group.push(message);
+      byPhone.set(message.phoneNumber, group);
+    }
+
+    for (const [phoneNumber, group] of byPhone) {
+      for (const message of group) {
+        this.logger.log(
+          `Mensaje recibido de ${phoneNumber} (type=${message.mediaType ?? 'text'}, id=${message.messageId ?? 'n/a'})`,
+        );
+      }
+
+      const images = group.filter(
+        (message) => message.mediaType === 'image' && (message.mediaId || message.mediaUrl),
       );
 
-      if (dto.mediaType === 'image' && (dto.mediaId || dto.mediaUrl)) {
-        await this.processPaymentFromScreenshot(dto.phoneNumber, {
-          mediaId: dto.mediaId,
-          mediaUrl: dto.mediaUrl,
-        });
-      } else if (dto.message) {
-        await this.processPaymentFromReference(dto.phoneNumber, dto.message);
+      if (images.length > 0) {
+        for (const image of images) {
+          try {
+            await this.processPaymentFromScreenshot(phoneNumber, {
+              mediaId: image.mediaId,
+              mediaUrl: image.mediaUrl,
+            });
+          } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : String(error);
+            this.logger.error(`Error procesando mensaje entrante: ${message}`);
+          }
+        }
+        continue;
       }
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
-      this.logger.error(`Error procesando mensaje entrante: ${message}`);
+
+      try {
+        await this.whatsappService.sendTextMessage(phoneNumber, SCREENSHOT_ONLY_REPLY);
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.logger.error(`Error respondiendo mensaje sin captura: ${message}`);
+      }
     }
   }
 
@@ -480,49 +507,12 @@ export class WhatsappBotService {
       };
     }
 
-    this.logger.debug(`Mensaje de Meta ignorado: type=${message.type ?? 'unknown'}`);
-    return null;
-  }
-
-  /**
-   * Procesa un pago desde una referencia de texto
-   */
-  private async processPaymentFromReference(phoneNumber: string, reference: string): Promise<void> {
-    try {
-      const collectionSend = await this.findLatestCollectionSendByPhoneNumber(phoneNumber);
-      if (!collectionSend) {
-        throw new BadRequestException('No se encontró un envío de cobranza asociado');
-      }
-
-      await this.createPaymentRecord({
-        collectionSendId: collectionSend.id,
-        referenceNumber: reference.trim(),
-        amount: Number(collectionSend.amountBs),
-        installmentNumber: collectionSend.installmentNumber,
-      });
-
-      await this.whatsappService.sendTextMessage(
-        phoneNumber,
-        'Su pago se está verificando, le avisamos cuando lo hayamos validado.',
-      );
-
-      this.logger.log(`Pago registrado para verificación: ${reference}`);
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
-      this.logger.error(`Error procesando referencia: ${message}`);
-
-      try {
-        await this.whatsappService.sendTextMessage(
-          phoneNumber,
-          'Hubo un error al procesar su pago. Por favor reenvíe la captura o el número de referencia.',
-        );
-      } catch (notifyError: unknown) {
-        const notifyMessage = notifyError instanceof Error ? notifyError.message : String(notifyError);
-        this.logger.error(`Error notificando fallo de referencia: ${notifyMessage}`);
-      }
-
-      throw error;
-    }
+    return {
+      phoneNumber,
+      message: message.type === 'text' ? message.text?.body?.trim() : undefined,
+      mediaType: message.type ?? 'unknown',
+      messageId: message.id,
+    };
   }
 
   /**
