@@ -28,6 +28,7 @@ const MAX_BANK_VERIFICATION_ATTEMPTS = 3;
 
 const TEMPLATE_NAME_PAYMENT_REMINDER = 'is_payment_date_v4';
 const TEMPLATE_NAME_EARLY_REMINDER = 'two_days_for_payme_day';
+const TEMPLATE_NAME_RECEIVED_PAYMENT = 'received_payment';
 
 const WHATSAPP_STATUS_RANK: Record<string, number> = {
   sent: 1,
@@ -816,10 +817,57 @@ export class WhatsappBotService {
         payment,
         'Tu pago fue verificado exitosamente. ¡Gracias!',
       );
+      await this.notifyUserPaymentReceived(payment);
       this.logger.log(`Pago verificado: ${payment.referenceNumber}`);
     }
 
     await this.paymentRepository.save(payment);
+  }
+
+  private async notifyUserPaymentReceived(payment: Payment): Promise<void> {
+    const collection = payment.collectionSend?.collection;
+    const client = collection?.client;
+    const user = collection?.user;
+    const phone = this.normalizeUserPhone(user?.phoneNumber);
+
+    if (!phone) {
+      this.logger.warn(
+        `Pago ${payment.id} verificado, pero el usuario ${user?.id ?? 'desconocido'} no tiene teléfono para la plantilla received_payment.`,
+      );
+      return;
+    }
+
+    const clientName = `${client?.firstName ?? ''} ${client?.lastName ?? ''}`.trim() || 'Cliente';
+    const amountUsd = Number(payment.collectionSend.amountUsd);
+    const amountBs = Number(payment.collectionSend.amountBs);
+
+    try {
+      await this.whatsappService.sendTemplateMessage({
+        to: phone,
+        templateName: TEMPLATE_NAME_RECEIVED_PAYMENT,
+        languageCode: 'es',
+        bodyParameters: {
+          client_name: clientName,
+          amount: `${amountUsd.toFixed(2)}`,
+          amount_bs: `${amountBs.toFixed(2)}`,
+          payment_description: collection?.concept?.trim() || 'Pago pendiente',
+          installment: String(payment.installmentNumber),
+        },
+      });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(
+        `No se pudo avisar al usuario ${user?.id ?? ''} del pago ${payment.id}: ${message}`,
+      );
+    }
+  }
+
+  private normalizeUserPhone(phone?: string | null): string {
+    const digits = phone?.replace(/\D/g, '') ?? '';
+    if (!digits) return '';
+    if (digits.startsWith('0')) return `58${digits.replace(/^0+/, '')}`;
+    if (!digits.startsWith('58') && digits.length <= 10) return `58${digits}`;
+    return digits;
   }
 
   private async notifyClientPaymentResult(payment: Payment, message: string): Promise<void> {
