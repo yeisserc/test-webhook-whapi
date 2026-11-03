@@ -3,7 +3,7 @@ import { mkdir, writeFile } from 'fs/promises';
 import { join } from 'path';
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { IsNull, LessThanOrEqual, Repository } from 'typeorm';
+import { Repository } from 'typeorm';
 import { Payment } from './entities/payment.entity';
 import { CollectionSend } from './entities/collection-send.entity';
 import { SendReminderDto } from './dto/send-reminder.dto';
@@ -22,15 +22,15 @@ import { User } from '../users/entities/user.entity';
 import { PAYMENT_BANK_LABELS } from '../users/payment-bank.enum';
 import { MailService } from '../mail/mail.service';
 import { WhatsappStatusGateway } from './whatsapp-status.gateway';
+import { extractAmountFromText } from '../utils';
 
-const BANK_VERIFICATION_RETRY_MINUTES = 10;
-const MAX_BANK_VERIFICATION_ATTEMPTS = 3;
+const MAX_BANK_VERIFICATION_ATTEMPTS = 100;
 
 const TEMPLATE_NAME_PAYMENT_REMINDER = 'is_payment_date_v4';
 const TEMPLATE_NAME_EARLY_REMINDER = 'two_days_for_payme_day';
 const TEMPLATE_NAME_RECEIVED_PAYMENT = 'received_payment';
 
-const SCREENSHOT_ONLY_REPLY = `📸 Para validar tu pago, por favor envía únicamente una imagen o captura del comprobante de pago por este chat.
+const SCREENSHOT_ONLY_REPLY = `📸 Para validar tu pago, por favor envía únicamente el capture del pago por este chat.
 
 No envíes texto ni otros archivos. ¡Gracias! 🙌`;
 
@@ -315,7 +315,7 @@ export class WhatsappBotService {
 
       await this.whatsappService.sendTextMessage(
         phoneNumber,
-        'Su pago se está verificando, le avisamos cuando lo hayamos validado.',
+        'Su pago se está verificando, le avisamos cuando lo hayamos validado. Esto puede tardar unos minutos.',
       );
 
       this.logger.log(`Pago registrado para verificación: ${extractedData.reference}`);
@@ -326,7 +326,7 @@ export class WhatsappBotService {
       try {
         await this.whatsappService.sendTextMessage(
           phoneNumber,
-          'Hubo un error al procesar su pago. Por favor reenvíe la captura o el número de referencia.',
+          'Hubo un error al procesar su pago. Por favor reenvíe el capture.',
         );
       } catch (notifyError: unknown) {
         const notifyMessage = notifyError instanceof Error ? notifyError.message : String(notifyError);
@@ -585,13 +585,7 @@ export class WhatsappBotService {
       const difference = Number(Math.abs(paymentAmount - expectedAmountBs).toFixed(2));
 
       if (difference > 0.01) {
-        payment.status = 'rejected';
-        payment.notes = `El monto del pago (${paymentAmount}) no coincide con el monto cobrado (${expectedAmountBs} Bs)`;
-        await this.paymentRepository.save(payment);
-        await this.notifyClientPaymentResult(
-          payment,
-          'No pudimos validar tu pago. Por favor ponte en contacto con tu vendedor.',
-        );
+        await this.rejectPaymentForAmountMismatch(payment, paymentAmount, expectedAmountBs);
         return;
       }
 
@@ -700,13 +694,7 @@ export class WhatsappBotService {
     const difference = Number(Math.abs(paymentAmount - expectedAmountBs).toFixed(2));
 
     if (difference > 0.01) {
-      payment.status = 'rejected';
-      payment.notes = `El monto del pago (${paymentAmount}) no coincide con el monto cobrado (${expectedAmountBs} Bs)`;
-      await this.paymentRepository.save(payment);
-      await this.notifyClientPaymentResult(
-        payment,
-        'No pudimos validar tu pago. Por favor ponte en contacto con tu vendedor.',
-      );
+      await this.rejectPaymentForAmountMismatch(payment, paymentAmount, expectedAmountBs);
       return false;
     }
 
@@ -754,6 +742,7 @@ export class WhatsappBotService {
       error: string;
       isTechnicalError: boolean;
       movementIsCorrect: boolean;
+      movements?: { reference: string; amount: string }[];
     },
   ): Promise<void> {
     const collectionSend = payment.collectionSend;
@@ -768,31 +757,41 @@ export class WhatsappBotService {
         await this.paymentRepository.save(payment);
         await this.notifyClientPaymentResult(
           payment,
-          'No pudimos validar tu pago. Por favor ponte en contacto con tu vendedor.',
+          'No pudimos consultar el banco para validar tu pago. Por favor ponte en contacto con tu vendedor.',
         );
         return;
       }
 
       payment.status = 'pending';
-      payment.nextVerificationAt = new Date(
-        Date.now() + attempts * BANK_VERIFICATION_RETRY_MINUTES * 60 * 1000,
-      );
-      payment.notes = `Reintento programado (${attempts}/${MAX_BANK_VERIFICATION_ATTEMPTS}): ${result.error}`;
+      payment.nextVerificationAt = null;
+      payment.notes = `Error técnico (${attempts}/${MAX_BANK_VERIFICATION_ATTEMPTS}): ${result.error}`;
       await this.paymentRepository.save(payment);
       this.logger.warn(
-        `Error técnico verificando pago ${payment.id}. Reintento #${attempts} en ${BANK_VERIFICATION_RETRY_MINUTES} min.`,
+        `Error técnico verificando pago ${payment.id}. Intento ${attempts}/${MAX_BANK_VERIFICATION_ATTEMPTS}.`,
       );
+
+      if (attempts === 4) {
+        try {
+          await this.notifyClientPaymentResult(
+            payment,
+            'La conexión con el banco está tardando. Seguimos verificando tu pago y te avisamos en cuanto tengamos el resultado.',
+          );
+        } catch (error: unknown) {
+          const message = error instanceof Error ? error.message : String(error);
+          this.logger.error(
+            `No se pudo avisar la demora del banco para el pago ${payment.id}: ${message}`,
+          );
+        }
+      }
       return;
     }
 
     if (!result.movementIsCorrect) {
+      const feedback = this.bankRejectionFeedback(payment, result.movements);
       payment.status = 'rejected';
       payment.nextVerificationAt = null;
-      payment.notes = 'No se pudo validar el pago en el banco';
-      await this.notifyClientPaymentResult(
-        payment,
-        'No pudimos validar tu pago. Por favor ponte en contacto con tu vendedor.',
-      );
+      payment.notes = feedback.notes;
+      await this.notifyClientPaymentResult(payment, feedback.message);
     } else {
       payment.status = 'verified';
       payment.verifiedAt = new Date();
@@ -860,6 +859,69 @@ export class WhatsappBotService {
     return digits;
   }
 
+  private async rejectPaymentForAmountMismatch(
+    payment: Payment,
+    paymentAmount: number,
+    expectedAmountBs: number,
+  ): Promise<void> {
+    payment.status = 'rejected';
+    payment.notes = `El monto del pago (${paymentAmount}) no coincide con el monto cobrado (${expectedAmountBs} Bs)`;
+    await this.paymentRepository.save(payment);
+    await this.notifyClientPaymentResult(
+      payment,
+      `No pudimos validar tu pago porque el monto del capture es ${this.formatBs(paymentAmount)} y la cuota que debes pagar es ${this.formatBs(expectedAmountBs)}.\n\nRevisa el pago y envía el capture correcto, o ponte en contacto con tu vendedor.`,
+    );
+  }
+
+  private bankRejectionFeedback(
+    payment: Payment,
+    movements: { reference: string; amount: string }[] | undefined,
+  ): { message: string; notes: string } {
+    const searched = payment.referenceNumber?.slice(-6) ?? '';
+    const reference = payment.referenceNumber?.trim() || searched || 'indicada';
+    const expected = Number(payment.collectionSend?.amountBs ?? payment.amount);
+    const related = (movements ?? []).filter(
+      (movement) => searched && movement.reference.includes(searched),
+    );
+
+    if (related.length === 0) {
+      return {
+        notes: `No se encontró en el banco un movimiento con la referencia ${reference}`,
+        message: `No pudimos validar tu pago. No encontramos en el banco un movimiento con la referencia ${reference}.\n\nRevisa que la captura corresponda a este pago, o ponte en contacto con tu vendedor.`,
+      };
+    }
+
+    const amounts = [
+      ...new Set(
+        related
+          .map((movement) => extractAmountFromText(movement.amount))
+          .filter((amount): amount is number => amount !== null)
+          .map((amount) => amount.toFixed(2)),
+      ),
+    ];
+    const amountMatches = amounts.some(
+      (amount) => Math.abs(Number(amount) - expected) <= 0.01,
+    );
+
+    if (amounts.length === 0 || amountMatches) {
+      return {
+        notes: `La referencia ${reference} aparece en el banco, pero no se pudo confirmar el movimiento`,
+        message:
+          'No pudimos confirmar el movimiento de tu pago en el banco. Por favor ponte en contacto con tu vendedor.',
+      };
+    }
+
+    const found = amounts.map((amount) => this.formatBs(Number(amount))).join(' y ');
+    return {
+      notes: `La referencia ${reference} está en el banco por ${found}, pero la cuota es ${this.formatBs(expected)}`,
+      message: `No pudimos validar tu pago. En el banco la referencia ${reference} aparece por ${found}, pero la cuota que debes pagar es ${this.formatBs(expected)}.\n\nRevisa el pago o ponte en contacto con tu vendedor.`,
+    };
+  }
+
+  private formatBs(amount: number): string {
+    return `${Number(amount).toFixed(2)} Bs.`;
+  }
+
   private async notifyClientPaymentResult(payment: Payment, message: string): Promise<void> {
     const client = payment.collectionSend.collection.client;
     const clientPhone = `${client.countryCode ?? ''}${client.phoneCode}${client.phoneNumber}`;
@@ -913,23 +975,13 @@ export class WhatsappBotService {
   }
 
   /**
-   * Obtiene pagos pendientes listos para verificación
-   * (sin reintento programado, o ya venció el tiempo de espera).
+   * Obtiene los pagos pendientes. Cada ejecución del cron los vuelve a intentar.
    */
   async getPendingPayments(): Promise<Payment[]> {
-    const now = new Date();
-
     const payments = await this.paymentRepository.find({
-      where: [
-        {
-          status: 'pending',
-          nextVerificationAt: IsNull(),
-        },
-        {
-          status: 'pending',
-          nextVerificationAt: LessThanOrEqual(now),
-        },
-      ],
+      where: {
+        status: 'pending',
+      },
       relations: {
         collectionSend: {
           collection: { client: true, user: true },
@@ -1070,7 +1122,7 @@ export class WhatsappBotService {
     if (type === 'payment_reminder') {
       return `Hola ${clientName}, recordatorio: en 2 días vence tu cuota de ${amount}Bs. Concepto: ${concept}.`;
     } else {
-      return `Hola ${clientName}, tu cuota de ${amount}Bs. vence hoy. Concepto: ${concept}. Favor enviar comprobante.`;
+      return `Hola ${clientName}, tu cuota de ${amount}Bs. vence hoy. Concepto: ${concept}. Favor enviar el capture del pago.`;
     }
   }
 
