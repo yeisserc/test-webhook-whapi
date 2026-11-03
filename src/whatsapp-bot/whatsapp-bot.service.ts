@@ -28,7 +28,7 @@ const MAX_BANK_VERIFICATION_ATTEMPTS = 100;
 
 const TEMPLATE_NAME_PAYMENT_REMINDER = 'is_payment_date_v4';
 const TEMPLATE_NAME_EARLY_REMINDER = 'two_days_for_payme_day';
-const TEMPLATE_NAME_RECEIVED_PAYMENT = 'received_payment';
+const TEMPLATE_NAME_RECEIVED_PAYMENT = 'received_payment_v2';
 /** Recordatorio de la tarde si no llegó el comprobante. El nombre lo define Meta. */
 const TEMPLATE_NAME_AFTERNOON_FOLLOWUP = '';
 /** Recobro del día siguiente. Mismos parámetros que is_payment_date_v4. */
