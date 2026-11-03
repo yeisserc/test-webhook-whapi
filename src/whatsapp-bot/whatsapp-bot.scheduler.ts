@@ -70,6 +70,48 @@ export class WhatsappBotSchedulerService {
   }
 
   /**
+   * A las 4:10 PM recuerda el cobro de hoy si no llegó el comprobante.
+   */
+  @Cron('10 16 * * *', {
+    timeZone: 'America/Caracas',
+  })
+  async sendAfternoonFollowups(): Promise<void> {
+    if (!this.paymentDueRemindersEnabled) {
+      return;
+    }
+
+    try {
+      this.logger.debug('Enviando recordatorios de la tarde...');
+      const count = await this.whatsappBotService.sendAfternoonFollowups();
+      this.logger.log(`${count} recordatorios de la tarde enviados`);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Error en sendAfternoonFollowups: ${message}`);
+    }
+  }
+
+  /**
+   * A las 9:10 AM reenvía el cobro de ayer y el de hace dos días si siguen sin comprobante.
+   */
+  @Cron('10 9 * * *', {
+    timeZone: 'America/Caracas',
+  })
+  async sendNextDayFollowups(): Promise<void> {
+    if (!this.paymentDueRemindersEnabled) {
+      return;
+    }
+
+    try {
+      this.logger.debug('Enviando recobros del día siguiente y de los dos días...');
+      const count = await this.whatsappBotService.sendNextDayFollowups();
+      this.logger.log(`${count} recobros enviados`);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Error en sendNextDayFollowups: ${message}`);
+    }
+  }
+
+  /**
    * Verifica automáticamente los pagos pendientes
    * Se ejecutaría cada 30 minutos con: @Cron(CronExpression.EVERY_30_MINUTES)
    */ 

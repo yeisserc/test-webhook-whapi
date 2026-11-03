@@ -3,7 +3,7 @@ import { mkdir, writeFile } from 'fs/promises';
 import { join } from 'path';
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { IsNull, LessThanOrEqual, Repository } from 'typeorm';
+import { Repository } from 'typeorm';
 import { Payment } from './entities/payment.entity';
 import { CollectionSend } from './entities/collection-send.entity';
 import { SendReminderDto } from './dto/send-reminder.dto';
@@ -22,15 +22,19 @@ import { User } from '../users/entities/user.entity';
 import { PAYMENT_BANK_LABELS } from '../users/payment-bank.enum';
 import { MailService } from '../mail/mail.service';
 import { WhatsappStatusGateway } from './whatsapp-status.gateway';
+import { extractAmountFromText } from '../utils';
 
-const BANK_VERIFICATION_RETRY_MINUTES = 10;
-const MAX_BANK_VERIFICATION_ATTEMPTS = 3;
+const MAX_BANK_VERIFICATION_ATTEMPTS = 100;
 
 const TEMPLATE_NAME_PAYMENT_REMINDER = 'is_payment_date_v4';
 const TEMPLATE_NAME_EARLY_REMINDER = 'two_days_for_payme_day';
-const TEMPLATE_NAME_RECEIVED_PAYMENT = 'received_payment';
+const TEMPLATE_NAME_RECEIVED_PAYMENT = 'received_payment_v2';
+/** Recordatorio de la tarde si no llegó el comprobante. El nombre lo define Meta. */
+const TEMPLATE_NAME_AFTERNOON_FOLLOWUP = '';
+/** Recobro del día siguiente. Mismos parámetros que is_payment_date_v4. */
+const TEMPLATE_NAME_NEXT_DAY_FOLLOWUP = '';
 
-const SCREENSHOT_ONLY_REPLY = `📸 Para validar tu pago, por favor envía únicamente una imagen o captura del comprobante de pago por este chat.
+const SCREENSHOT_ONLY_REPLY = `📸 Para validar tu pago, por favor envía únicamente el capture del pago por este chat.
 
 No envíes texto ni otros archivos. ¡Gracias! 🙌`;
 
@@ -40,7 +44,10 @@ const WHATSAPP_STATUS_RANK: Record<string, number> = {
   read: 3,
 };
 
-type TemplateName = typeof TEMPLATE_NAME_PAYMENT_REMINDER | typeof TEMPLATE_NAME_EARLY_REMINDER;
+type TemplateName =
+  | typeof TEMPLATE_NAME_PAYMENT_REMINDER
+  | typeof TEMPLATE_NAME_EARLY_REMINDER
+  | typeof TEMPLATE_NAME_NEXT_DAY_FOLLOWUP;
 
 @Injectable()
 export class WhatsappBotService {
@@ -93,6 +100,7 @@ export class WhatsappBotService {
         dto.daysUntilPayment,
         amountUsd,
         amountBs,
+        collection.currentInstallment,
       );
 
       const sendResult = await this.whatsappService.sendTemplateMessage({
@@ -315,7 +323,7 @@ export class WhatsappBotService {
 
       await this.whatsappService.sendTextMessage(
         phoneNumber,
-        'Su pago se está verificando, le avisamos cuando lo hayamos validado.',
+        'Su pago se está verificando, le avisamos cuando lo hayamos validado. Esto puede tardar unos minutos.',
       );
 
       this.logger.log(`Pago registrado para verificación: ${extractedData.reference}`);
@@ -326,7 +334,7 @@ export class WhatsappBotService {
       try {
         await this.whatsappService.sendTextMessage(
           phoneNumber,
-          'Hubo un error al procesar su pago. Por favor reenvíe la captura o el número de referencia.',
+          'Hubo un error al procesar su pago. Por favor reenvíe el capture.',
         );
       } catch (notifyError: unknown) {
         const notifyMessage = notifyError instanceof Error ? notifyError.message : String(notifyError);
@@ -585,13 +593,7 @@ export class WhatsappBotService {
       const difference = Number(Math.abs(paymentAmount - expectedAmountBs).toFixed(2));
 
       if (difference > 0.01) {
-        payment.status = 'rejected';
-        payment.notes = `El monto del pago (${paymentAmount}) no coincide con el monto cobrado (${expectedAmountBs} Bs)`;
-        await this.paymentRepository.save(payment);
-        await this.notifyClientPaymentResult(
-          payment,
-          'No pudimos validar tu pago. Por favor ponte en contacto con tu vendedor.',
-        );
+        await this.rejectPaymentForAmountMismatch(payment, paymentAmount, expectedAmountBs);
         return;
       }
 
@@ -700,13 +702,7 @@ export class WhatsappBotService {
     const difference = Number(Math.abs(paymentAmount - expectedAmountBs).toFixed(2));
 
     if (difference > 0.01) {
-      payment.status = 'rejected';
-      payment.notes = `El monto del pago (${paymentAmount}) no coincide con el monto cobrado (${expectedAmountBs} Bs)`;
-      await this.paymentRepository.save(payment);
-      await this.notifyClientPaymentResult(
-        payment,
-        'No pudimos validar tu pago. Por favor ponte en contacto con tu vendedor.',
-      );
+      await this.rejectPaymentForAmountMismatch(payment, paymentAmount, expectedAmountBs);
       return false;
     }
 
@@ -754,6 +750,7 @@ export class WhatsappBotService {
       error: string;
       isTechnicalError: boolean;
       movementIsCorrect: boolean;
+      movements?: { reference: string; amount: string }[];
     },
   ): Promise<void> {
     const collectionSend = payment.collectionSend;
@@ -768,31 +765,41 @@ export class WhatsappBotService {
         await this.paymentRepository.save(payment);
         await this.notifyClientPaymentResult(
           payment,
-          'No pudimos validar tu pago. Por favor ponte en contacto con tu vendedor.',
+          'No pudimos consultar el banco para validar tu pago. Por favor ponte en contacto con tu vendedor.',
         );
         return;
       }
 
       payment.status = 'pending';
-      payment.nextVerificationAt = new Date(
-        Date.now() + attempts * BANK_VERIFICATION_RETRY_MINUTES * 60 * 1000,
-      );
-      payment.notes = `Reintento programado (${attempts}/${MAX_BANK_VERIFICATION_ATTEMPTS}): ${result.error}`;
+      payment.nextVerificationAt = null;
+      payment.notes = `Error técnico (${attempts}/${MAX_BANK_VERIFICATION_ATTEMPTS}): ${result.error}`;
       await this.paymentRepository.save(payment);
       this.logger.warn(
-        `Error técnico verificando pago ${payment.id}. Reintento #${attempts} en ${BANK_VERIFICATION_RETRY_MINUTES} min.`,
+        `Error técnico verificando pago ${payment.id}. Intento ${attempts}/${MAX_BANK_VERIFICATION_ATTEMPTS}.`,
       );
+
+      if (attempts === 4) {
+        try {
+          await this.notifyClientPaymentResult(
+            payment,
+            'La conexión con el banco está tardando. Seguimos verificando tu pago y te avisamos en cuanto tengamos el resultado.',
+          );
+        } catch (error: unknown) {
+          const message = error instanceof Error ? error.message : String(error);
+          this.logger.error(
+            `No se pudo avisar la demora del banco para el pago ${payment.id}: ${message}`,
+          );
+        }
+      }
       return;
     }
 
     if (!result.movementIsCorrect) {
+      const feedback = this.bankRejectionFeedback(payment, result.movements);
       payment.status = 'rejected';
       payment.nextVerificationAt = null;
-      payment.notes = 'No se pudo validar el pago en el banco';
-      await this.notifyClientPaymentResult(
-        payment,
-        'No pudimos validar tu pago. Por favor ponte en contacto con tu vendedor.',
-      );
+      payment.notes = feedback.notes;
+      await this.notifyClientPaymentResult(payment, feedback.message);
     } else {
       payment.status = 'verified';
       payment.verifiedAt = new Date();
@@ -860,6 +867,69 @@ export class WhatsappBotService {
     return digits;
   }
 
+  private async rejectPaymentForAmountMismatch(
+    payment: Payment,
+    paymentAmount: number,
+    expectedAmountBs: number,
+  ): Promise<void> {
+    payment.status = 'rejected';
+    payment.notes = `El monto del pago (${paymentAmount}) no coincide con el monto cobrado (${expectedAmountBs} Bs)`;
+    await this.paymentRepository.save(payment);
+    await this.notifyClientPaymentResult(
+      payment,
+      `No pudimos validar tu pago porque el monto del capture es ${this.formatBs(paymentAmount)} y la cuota que debes pagar es ${this.formatBs(expectedAmountBs)}.\n\nRevisa el pago y envía el capture correcto, o ponte en contacto con tu vendedor.`,
+    );
+  }
+
+  private bankRejectionFeedback(
+    payment: Payment,
+    movements: { reference: string; amount: string }[] | undefined,
+  ): { message: string; notes: string } {
+    const searched = payment.referenceNumber?.slice(-6) ?? '';
+    const reference = payment.referenceNumber?.trim() || searched || 'indicada';
+    const expected = Number(payment.collectionSend?.amountBs ?? payment.amount);
+    const related = (movements ?? []).filter(
+      (movement) => searched && movement.reference.includes(searched),
+    );
+
+    if (related.length === 0) {
+      return {
+        notes: `No se encontró en el banco un movimiento con la referencia ${reference}`,
+        message: `No pudimos validar tu pago. No encontramos en el banco un movimiento con la referencia ${reference}.\n\nRevisa que la captura corresponda a este pago, o ponte en contacto con tu vendedor.`,
+      };
+    }
+
+    const amounts = [
+      ...new Set(
+        related
+          .map((movement) => extractAmountFromText(movement.amount))
+          .filter((amount): amount is number => amount !== null)
+          .map((amount) => amount.toFixed(2)),
+      ),
+    ];
+    const amountMatches = amounts.some(
+      (amount) => Math.abs(Number(amount) - expected) <= 0.01,
+    );
+
+    if (amounts.length === 0 || amountMatches) {
+      return {
+        notes: `La referencia ${reference} aparece en el banco, pero no se pudo confirmar el movimiento`,
+        message:
+          'No pudimos confirmar el movimiento de tu pago en el banco. Por favor ponte en contacto con tu vendedor.',
+      };
+    }
+
+    const found = amounts.map((amount) => this.formatBs(Number(amount))).join(' y ');
+    return {
+      notes: `La referencia ${reference} está en el banco por ${found}, pero la cuota es ${this.formatBs(expected)}`,
+      message: `No pudimos validar tu pago. En el banco la referencia ${reference} aparece por ${found}, pero la cuota que debes pagar es ${this.formatBs(expected)}.\n\nRevisa el pago o ponte en contacto con tu vendedor.`,
+    };
+  }
+
+  private formatBs(amount: number): string {
+    return `${Number(amount).toFixed(2)} Bs.`;
+  }
+
   private async notifyClientPaymentResult(payment: Payment, message: string): Promise<void> {
     const client = payment.collectionSend.collection.client;
     const clientPhone = `${client.countryCode ?? ''}${client.phoneCode}${client.phoneNumber}`;
@@ -913,23 +983,13 @@ export class WhatsappBotService {
   }
 
   /**
-   * Obtiene pagos pendientes listos para verificación
-   * (sin reintento programado, o ya venció el tiempo de espera).
+   * Obtiene los pagos pendientes. Cada ejecución del cron los vuelve a intentar.
    */
   async getPendingPayments(): Promise<Payment[]> {
-    const now = new Date();
-
     const payments = await this.paymentRepository.find({
-      where: [
-        {
-          status: 'pending',
-          nextVerificationAt: IsNull(),
-        },
-        {
-          status: 'pending',
-          nextVerificationAt: LessThanOrEqual(now),
-        },
-      ],
+      where: {
+        status: 'pending',
+      },
       relations: {
         collectionSend: {
           collection: { client: true, user: true },
@@ -939,6 +999,110 @@ export class WhatsappBotService {
     });
 
     return payments.filter((payment) => this.canVerifyUserBank(payment.collectionSend?.collection?.user));
+  }
+
+  /**
+   * Por la tarde, recuerda el cobro de hoy si todavía no llegó un comprobante.
+   */
+  async sendAfternoonFollowups(): Promise<number> {
+    if (!TEMPLATE_NAME_AFTERNOON_FOLLOWUP) {
+      this.logger.warn('Recordatorio de la tarde omitido: falta el nombre de la plantilla.');
+      return 0;
+    }
+
+    const sends = await this.findChargeSendsOnCaracasDay(0);
+    let sent = 0;
+
+    for (const send of sends) {
+      if (send.afternoonFollowupSentAt || this.sendHasReceipt(send) || this.chargeIsSettled(send)) {
+        continue;
+      }
+
+      const phoneNumber = this.clientPhone(send.collection);
+      if (!phoneNumber) {
+        this.logger.warn(`Cobranza ${send.collectionId} sin teléfono para el recordatorio de la tarde.`);
+        continue;
+      }
+
+      try {
+        const client = send.collection.client;
+        await this.whatsappService.sendTemplateMessage({
+          to: phoneNumber,
+          templateName: TEMPLATE_NAME_AFTERNOON_FOLLOWUP,
+          bodyParameters: {
+            client_name: `${client.firstName} ${client.lastName}`.trim(),
+            amount: `${Number(send.amountUsd).toFixed(2)}$`,
+            amount_bs: `${Number(send.amountBs).toFixed(2)} Bs.`,
+          },
+        });
+        await this.collectionSendRepository.update(send.id, { afternoonFollowupSentAt: new Date() });
+        sent += 1;
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.logger.error(`Error en recordatorio de la tarde para envío ${send.id}: ${message}`);
+      }
+    }
+
+    return sent;
+  }
+
+  /**
+   * Reenvía el cobro al día siguiente y a los dos días si sigue sin comprobante.
+   */
+  async sendNextDayFollowups(): Promise<number> {
+    if (!TEMPLATE_NAME_NEXT_DAY_FOLLOWUP) {
+      this.logger.warn('Recobro omitido: falta el nombre de la plantilla.');
+      return 0;
+    }
+
+    const nextDay = await this.sendChargeFollowup(-1, 'nextDayFollowupSentAt', 'del día siguiente');
+    const twoDays = await this.sendChargeFollowup(-2, 'twoDayFollowupSentAt', 'de los dos días');
+    return nextDay + twoDays;
+  }
+
+  private async sendChargeFollowup(
+    dayOffset: number,
+    sentAtField: 'nextDayFollowupSentAt' | 'twoDayFollowupSentAt',
+    label: string,
+  ): Promise<number> {
+    const sends = await this.findChargeSendsOnCaracasDay(dayOffset);
+    let sent = 0;
+
+    for (const send of sends) {
+      if (send[sentAtField] || this.sendHasReceipt(send) || this.chargeIsSettled(send)) {
+        continue;
+      }
+
+      const collection = send.collection;
+      const phoneNumber = this.clientPhone(collection);
+      if (!phoneNumber) {
+        this.logger.warn(`Cobranza ${send.collectionId} sin teléfono para el recobro ${label}.`);
+        continue;
+      }
+
+      try {
+        const bodyParameters = this.buildBodyParameters(
+          collection,
+          TEMPLATE_NAME_NEXT_DAY_FOLLOWUP,
+          0,
+          Number(send.amountUsd),
+          Number(send.amountBs),
+          send.installmentNumber,
+        );
+        await this.whatsappService.sendTemplateMessage({
+          to: phoneNumber,
+          templateName: TEMPLATE_NAME_NEXT_DAY_FOLLOWUP,
+          bodyParameters,
+        });
+        await this.collectionSendRepository.update(send.id, { [sentAtField]: new Date() });
+        sent += 1;
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.logger.error(`Error en recobro ${label} para envío ${send.id}: ${message}`);
+      }
+    }
+
+    return sent;
   }
 
   /**
@@ -1062,6 +1226,13 @@ export class WhatsappBotService {
     }
   }
 
+  private usesPaymentDateParameters(templateName: string): boolean {
+    return (
+      templateName === TEMPLATE_NAME_PAYMENT_REMINDER ||
+      (TEMPLATE_NAME_NEXT_DAY_FOLLOWUP !== '' && templateName === TEMPLATE_NAME_NEXT_DAY_FOLLOWUP)
+    );
+  }
+
   private buildReminderMessage(collection: Collection, type: 'payment_reminder' | 'payment_due'): string {
     const clientName = collection.client.firstName;
     const amount = collection.currentDebt.toFixed(2);
@@ -1070,8 +1241,53 @@ export class WhatsappBotService {
     if (type === 'payment_reminder') {
       return `Hola ${clientName}, recordatorio: en 2 días vence tu cuota de ${amount}Bs. Concepto: ${concept}.`;
     } else {
-      return `Hola ${clientName}, tu cuota de ${amount}Bs. vence hoy. Concepto: ${concept}. Favor enviar comprobante.`;
+      return `Hola ${clientName}, tu cuota de ${amount}Bs. vence hoy. Concepto: ${concept}. Favor enviar el capture del pago.`;
     }
+  }
+
+  private caracasDayBounds(dayOffset: number): { start: Date; end: Date } {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/Caracas',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(new Date());
+    const year = Number(parts.find((part) => part.type === 'year')?.value);
+    const month = Number(parts.find((part) => part.type === 'month')?.value);
+    const day = Number(parts.find((part) => part.type === 'day')?.value);
+    const start = new Date(Date.UTC(year, month - 1, day + dayOffset, 4, 0, 0, 0));
+    const end = new Date(Date.UTC(year, month - 1, day + dayOffset + 1, 4, 0, 0, 0));
+    return { start, end };
+  }
+
+  private async findChargeSendsOnCaracasDay(dayOffset: number): Promise<CollectionSend[]> {
+    const { start, end } = this.caracasDayBounds(dayOffset);
+    return this.collectionSendRepository
+      .createQueryBuilder('cs')
+      .innerJoinAndSelect('cs.collection', 'collection')
+      .innerJoinAndSelect('collection.client', 'client')
+      .innerJoinAndSelect('collection.user', 'user')
+      .leftJoinAndSelect('cs.payments', 'payment')
+      .where('cs.sentAt >= :start AND cs.sentAt < :end', { start, end })
+      .andWhere("(cs.whatsappStatus IS NULL OR cs.whatsappStatus <> 'failed')")
+      .getMany();
+  }
+
+  private sendHasReceipt(send: CollectionSend): boolean {
+    return (send.payments ?? []).some((payment) => Boolean(payment.screenshotUrl?.trim()));
+  }
+
+  private chargeIsSettled(send: CollectionSend): boolean {
+    const collection = send.collection;
+    return Number(collection.currentDebt) <= 0 || collection.currentInstallment > send.installmentNumber;
+  }
+
+  private clientPhone(collection: Collection): string | null {
+    const client = collection.client;
+    if (!client?.phoneCode?.trim() || !client.phoneNumber?.trim()) {
+      return null;
+    }
+    return `${client.countryCode ?? ''}${client.phoneCode}${client.phoneNumber}`;
   }
 
   private buildBodyParameters(
@@ -1080,12 +1296,13 @@ export class WhatsappBotService {
     daysUntilPayment: number,
     amountUsd: number,
     amountBs: number,
+    installmentNumber: number,
   ): Record<string, string> {
     const currentDate = new Date().toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
     const clientName = `${collection.client.firstName} ${collection.client.lastName}`;
     const paymentDescription = collection.concept || 'Pago pendiente';
 
-    if (templateName === TEMPLATE_NAME_PAYMENT_REMINDER) {
+    if (this.usesPaymentDateParameters(templateName)) {
       const companyName = collection.user?.companyName?.trim() ?? '';
       const paymentDocument = collection.user?.paymentDocument?.trim() ?? '';
       const paymentPhoneNumber = collection.user?.paymentPhoneNumber?.trim() ?? '';
@@ -1105,7 +1322,7 @@ export class WhatsappBotService {
         amount: amountUsd.toFixed(2) + '$',
         payment_description: paymentDescription,
         amount_bs: amountBs.toFixed(2) + ' Bs.',
-        installment: collection.currentInstallment.toString(),
+        installment: installmentNumber.toString(),
         company_name: companyName,
         payment_document: paymentDocument,
         payment_phone_number: paymentPhoneNumber,

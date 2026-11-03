@@ -83,6 +83,15 @@ export class CollectionSend {
   @Column({ name: 'whatsapp_error', type: 'text', nullable: true })
   whatsappError?: string | null;
 
+  @Column({ name: 'afternoon_followup_sent_at', type: 'timestamptz', nullable: true })
+  afternoonFollowupSentAt?: Date | null;
+
+  @Column({ name: 'next_day_followup_sent_at', type: 'timestamptz', nullable: true })
+  nextDayFollowupSentAt?: Date | null;
+
+  @Column({ name: 'two_day_followup_sent_at', type: 'timestamptz', nullable: true })
+  twoDayFollowupSentAt?: Date | null;
+
   @OneToMany(() => Payment, (payment) => payment.collectionSend)
   payments!: Payment[];
 
