@@ -91,7 +91,7 @@ export class WhatsappBotSchedulerService {
   }
 
   /**
-   * A las 9:10 AM del día siguiente reenvía el cobro si sigue sin comprobante.
+   * A las 9:10 AM reenvía el cobro de ayer y el de hace dos días si siguen sin comprobante.
    */
   @Cron('10 9 * * *', {
     timeZone: 'America/Caracas',
@@ -102,9 +102,9 @@ export class WhatsappBotSchedulerService {
     }
 
     try {
-      this.logger.debug('Enviando recobros del día siguiente...');
+      this.logger.debug('Enviando recobros del día siguiente y de los dos días...');
       const count = await this.whatsappBotService.sendNextDayFollowups();
-      this.logger.log(`${count} recobros del día siguiente enviados`);
+      this.logger.log(`${count} recobros enviados`);
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       this.logger.error(`Error en sendNextDayFollowups: ${message}`);

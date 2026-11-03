@@ -1047,26 +1047,36 @@ export class WhatsappBotService {
   }
 
   /**
-   * Al día siguiente, reenvía el cobro si ese envío sigue sin comprobante.
+   * Reenvía el cobro al día siguiente y a los dos días si sigue sin comprobante.
    */
   async sendNextDayFollowups(): Promise<number> {
     if (!TEMPLATE_NAME_NEXT_DAY_FOLLOWUP) {
-      this.logger.warn('Recobro del día siguiente omitido: falta el nombre de la plantilla.');
+      this.logger.warn('Recobro omitido: falta el nombre de la plantilla.');
       return 0;
     }
 
-    const sends = await this.findChargeSendsOnCaracasDay(-1);
+    const nextDay = await this.sendChargeFollowup(-1, 'nextDayFollowupSentAt', 'del día siguiente');
+    const twoDays = await this.sendChargeFollowup(-2, 'twoDayFollowupSentAt', 'de los dos días');
+    return nextDay + twoDays;
+  }
+
+  private async sendChargeFollowup(
+    dayOffset: number,
+    sentAtField: 'nextDayFollowupSentAt' | 'twoDayFollowupSentAt',
+    label: string,
+  ): Promise<number> {
+    const sends = await this.findChargeSendsOnCaracasDay(dayOffset);
     let sent = 0;
 
     for (const send of sends) {
-      if (send.nextDayFollowupSentAt || this.sendHasReceipt(send) || this.chargeIsSettled(send)) {
+      if (send[sentAtField] || this.sendHasReceipt(send) || this.chargeIsSettled(send)) {
         continue;
       }
 
       const collection = send.collection;
       const phoneNumber = this.clientPhone(collection);
       if (!phoneNumber) {
-        this.logger.warn(`Cobranza ${send.collectionId} sin teléfono para el recobro del día siguiente.`);
+        this.logger.warn(`Cobranza ${send.collectionId} sin teléfono para el recobro ${label}.`);
         continue;
       }
 
@@ -1084,11 +1094,11 @@ export class WhatsappBotService {
           templateName: TEMPLATE_NAME_NEXT_DAY_FOLLOWUP,
           bodyParameters,
         });
-        await this.collectionSendRepository.update(send.id, { nextDayFollowupSentAt: new Date() });
+        await this.collectionSendRepository.update(send.id, { [sentAtField]: new Date() });
         sent += 1;
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : String(error);
-        this.logger.error(`Error en recobro del día siguiente para envío ${send.id}: ${message}`);
+        this.logger.error(`Error en recobro ${label} para envío ${send.id}: ${message}`);
       }
     }
 

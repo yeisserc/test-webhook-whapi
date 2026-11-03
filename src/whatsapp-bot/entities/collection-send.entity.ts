@@ -89,6 +89,9 @@ export class CollectionSend {
   @Column({ name: 'next_day_followup_sent_at', type: 'timestamptz', nullable: true })
   nextDayFollowupSentAt?: Date | null;
 
+  @Column({ name: 'two_day_followup_sent_at', type: 'timestamptz', nullable: true })
+  twoDayFollowupSentAt?: Date | null;
+
   @OneToMany(() => Payment, (payment) => payment.collectionSend)
   payments!: Payment[];
 
