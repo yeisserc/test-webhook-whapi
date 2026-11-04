@@ -28,9 +28,9 @@ const TEMPLATE_NAME_PAYMENT_REMINDER = 'is_payment_date_v4';
 const TEMPLATE_NAME_EARLY_REMINDER = 'two_days_for_payme_day';
 const TEMPLATE_NAME_RECEIVED_PAYMENT = 'received_payment_v2';
 /** Recordatorio de la tarde si no llegó el comprobante. El nombre lo define Meta. */
-const TEMPLATE_NAME_AFTERNOON_FOLLOWUP = '';
+const TEMPLATE_NAME_AFTERNOON_FOLLOWUP = 'afternoon_follow_up';
 /** Recobro del día siguiente. Mismos parámetros que is_payment_date_v4. */
-const TEMPLATE_NAME_NEXT_DAY_FOLLOWUP = '';
+const TEMPLATE_NAME_NEXT_DAY_FOLLOWUP = 'payment_next_day_follow_up';
 
 const SCREENSHOT_ONLY_REPLY = `📸 Para validar tu pago, por favor envía únicamente el capture del pago por este chat.
 
