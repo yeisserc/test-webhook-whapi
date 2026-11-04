@@ -1208,7 +1208,7 @@ export class WhatsappBotService {
   private usesPaymentDateParameters(templateName: string): boolean {
     return (
       templateName === TEMPLATE_NAME_PAYMENT_REMINDER ||
-      (TEMPLATE_NAME_NEXT_DAY_FOLLOWUP !== '' && templateName === TEMPLATE_NAME_NEXT_DAY_FOLLOWUP)
+      templateName === TEMPLATE_NAME_NEXT_DAY_FOLLOWUP
     );
   }
 
