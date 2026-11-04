@@ -99,7 +99,9 @@ export class ClientsService {
               amount: payment.amount,
               installmentNumber: payment.installmentNumber,
               referenceNumber: payment.referenceNumber,
-              screenshotUrl: payment.screenshotUrl,
+              screenshotUrl: payment.screenshotUrl
+                ? `payments/${payment.id}/screenshot`
+                : null,
               status: payment.status,
               notes: payment.notes,
               createdAt: payment.createdAt,

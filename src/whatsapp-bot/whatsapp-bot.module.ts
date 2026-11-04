@@ -15,6 +15,7 @@ import { Client } from '../clients/entities/client.entity';
 import { WhatsappModule } from '../whatsapp/whatsapp.module';
 import { UsersModule } from '../users/users.module';
 import { MailModule } from '../mail/mail.module';
+import { StorageModule } from '../storage/storage.module';
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { MailModule } from '../mail/mail.module';
     WhatsappModule,
     UsersModule,
     MailModule,
+    StorageModule,
   ],
   controllers: [WhatsappBotController],
   providers: [WhatsappBotService, WhatsappBotSchedulerService, WhatsappStatusGateway],
