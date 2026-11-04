@@ -11,6 +11,7 @@ import { CollectionsModule } from './collections/collections.module';
 import { CurrencyRatesModule } from './currency-rates/currency-rates.module';
 import { MailModule } from './mail/mail.module';
 import { OpenaiExtractionModule } from './openai-extraction/openai-extraction.module';
+import { PaymentsModule } from './payments/payments.module';
 import { UsersModule } from './users/users.module';
 import { WhatsappBotModule } from './whatsapp-bot/whatsapp-bot.module';
 import { WhatsappModule } from './whatsapp/whatsapp.module';
@@ -49,6 +50,7 @@ import { WhatsappModule } from './whatsapp/whatsapp.module';
     CurrencyRatesModule,
     BankAutomationModule,
     OpenaiExtractionModule,
+    PaymentsModule,
     WhatsappModule,
     WhatsappBotModule,
     MailModule,
