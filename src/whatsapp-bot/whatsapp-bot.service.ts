@@ -29,7 +29,7 @@ const TEMPLATE_NAME_EARLY_REMINDER = 'two_days_for_payme_day';
 const TEMPLATE_NAME_RECEIVED_PAYMENT = 'received_payment_v2';
 /** Recordatorio de la tarde si no llegó el comprobante. El nombre lo define Meta. */
 const TEMPLATE_NAME_AFTERNOON_FOLLOWUP = 'afternoon_follow_up';
-/** Recobro del día siguiente. Mismos parámetros que is_payment_date_v4. */
+/** Recobro del día siguiente. Mismos parámetros que is_payment_date_v4, sin current_date. */
 const TEMPLATE_NAME_NEXT_DAY_FOLLOWUP = 'payment_next_day_follow_up';
 
 const SCREENSHOT_ONLY_REPLY = `📸 Para validar tu pago, por favor envía únicamente el capture del pago por este chat.
@@ -1033,6 +1033,7 @@ export class WhatsappBotService {
             amount: `${Number(send.amountUsd).toFixed(2)}$`,
             amount_bs: `${Number(send.amountBs).toFixed(2)} Bs.`,
           },
+          languageCode: 'en',
         });
         await this.collectionSendRepository.update(send.id, { afternoonFollowupSentAt: new Date() });
         sent += 1;
@@ -1066,6 +1067,14 @@ export class WhatsappBotService {
   ): Promise<number> {
     const sends = await this.findChargeSendsOnCaracasDay(dayOffset);
     let sent = 0;
+    let currencyRate: number;
+    try {
+      currencyRate = await this.currencyRatesService.getCurrentRate('USD');
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Recobro ${label} omitido: no se pudo obtener la tasa del día. ${message}`);
+      return 0;
+    }
 
     for (const send of sends) {
       if (send[sentAtField] || this.sendHasReceipt(send) || this.chargeIsSettled(send)) {
@@ -1079,13 +1088,16 @@ export class WhatsappBotService {
         continue;
       }
 
+      const amountUsd = Number(send.amountUsd);
+      const amountBs = Number((amountUsd * currencyRate).toFixed(2));
+
       try {
         const bodyParameters = this.buildBodyParameters(
           collection,
           TEMPLATE_NAME_NEXT_DAY_FOLLOWUP,
           0,
-          Number(send.amountUsd),
-          Number(send.amountBs),
+          amountUsd,
+          amountBs,
           send.installmentNumber,
         );
         await this.whatsappService.sendTemplateMessage({
@@ -1093,7 +1105,10 @@ export class WhatsappBotService {
           templateName: TEMPLATE_NAME_NEXT_DAY_FOLLOWUP,
           bodyParameters,
         });
-        await this.collectionSendRepository.update(send.id, { [sentAtField]: new Date() });
+        await this.collectionSendRepository.update(send.id, {
+          [sentAtField]: new Date(),
+          amountBs,
+        });
         sent += 1;
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : String(error);
@@ -1295,9 +1310,8 @@ export class WhatsappBotService {
         );
       }
 
-      return {
+      const parameters: Record<string, string> = {
         client_name: clientName,
-        current_date: currentDate,
         amount: amountUsd.toFixed(2) + '$',
         payment_description: paymentDescription,
         amount_bs: amountBs.toFixed(2) + ' Bs.',
@@ -1307,6 +1321,12 @@ export class WhatsappBotService {
         payment_phone_number: paymentPhoneNumber,
         payment_bank_name: paymentBankName,
       };
+
+      if (templateName === TEMPLATE_NAME_PAYMENT_REMINDER) {
+        parameters.current_date = currentDate;
+      }
+
+      return parameters;
     }
 
     const paymentDate = new Date(new Date().setDate(new Date().getDate() + daysUntilPayment)).toLocaleDateString('es-ES', {

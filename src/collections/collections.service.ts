@@ -313,7 +313,7 @@ export class CollectionsService {
    * Calcula la próxima fecha de pago (incluyendo el día de referencia si cae en cobro)
    * basada en frequency y collectionDay.
    */
-  private calculateNextPaymentDate(collection: Collection, referenceDate: Date): Date | null {
+  calculateNextPaymentDate(collection: Collection, referenceDate: Date): Date | null {
     const ref = new Date(referenceDate);
     ref.setHours(0, 0, 0, 0);
 
