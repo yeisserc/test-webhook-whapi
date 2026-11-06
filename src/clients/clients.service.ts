@@ -24,12 +24,30 @@ export class ClientsService {
     private readonly paymentsRepository: Repository<Payment>,
   ) {}
 
-  findAll(userId?: string) {
-    return this.clientsRepository.find({
+  async findAll(userId?: string) {
+    const clients = await this.clientsRepository.find({
       where: userId ? { userId } : {},
       relations: { user: true },
       order: { createdAt: 'DESC' },
     });
+    if (!clients.length) return clients;
+
+    const rows = await this.collectionSendsRepository
+      .createQueryBuilder('send')
+      .innerJoin('send.collection', 'collection')
+      .leftJoin('send.payments', 'payment', 'payment.status = :verified', { verified: 'verified' })
+      .select('collection.clientId', 'clientId')
+      .addSelect('COUNT(DISTINCT send.id)', 'count')
+      .where('collection.clientId IN (:...ids)', { ids: clients.map((client) => client.id) })
+      .andWhere('payment.id IS NULL')
+      .groupBy('collection.clientId')
+      .getRawMany<{ clientId: string; count: string }>();
+
+    const pendingByClient = new Map(rows.map((row) => [row.clientId, Number(row.count)]));
+    for (const client of clients) {
+      Object.assign(client, { pendingPayments: pendingByClient.get(client.id) ?? 0 });
+    }
+    return clients;
   }
 
   async findOne(id: string) {
