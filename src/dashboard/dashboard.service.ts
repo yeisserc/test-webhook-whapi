@@ -90,7 +90,7 @@ export class DashboardService {
     const upcoming = scheduled.filter((item) => item.chargeDate > todayKey);
     const nextCharge = scheduled[0] ?? null;
     const attention = payments
-      .filter((payment) => payment.status === 'pending' || payment.status === 'rejected')
+      .filter((payment) => payment.status === 'rejected')
       .slice(0, 6)
       .map((payment) => this.toAttention(payment));
 
@@ -222,9 +222,9 @@ export class DashboardService {
       id: payment.id,
       clientId: payment.collectionSend.collection.clientId,
       clientName: `${client.firstName} ${client.lastName}`.trim(),
-      status: payment.status,
+      status: 'rejected',
       amountUsd: Number(payment.collectionSend.amountUsd),
-      detail: payment.status === 'rejected' ? 'Comprobante no válido' : 'Pago recibido',
+      detail: 'Comprobante no válido',
     };
   }
 
