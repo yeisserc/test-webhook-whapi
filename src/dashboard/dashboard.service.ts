@@ -191,7 +191,7 @@ export class DashboardService {
     return {
       collectionId: collection.id,
       clientId: collection.clientId,
-      clientName: `${collection.client.firstName} ${collection.client.lastName}`.trim(),
+      clientName: `${collection.client.firstName} ${collection.client.lastName ?? ''}`.trim(),
       installmentNumber: collection.currentInstallment,
       amountUsd: Number(Number(collection.totalDebt / collection.installments).toFixed(2)),
       chargeDate,
@@ -206,7 +206,7 @@ export class DashboardService {
     return {
       id: send.id,
       clientId: send.collection.clientId,
-      clientName: `${client.firstName} ${client.lastName}`.trim(),
+      clientName: `${client.firstName} ${client.lastName ?? ''}`.trim(),
       installmentNumber: send.installmentNumber,
       amountUsd: Number(send.amountUsd),
       sentAt: send.sentAt,
@@ -221,7 +221,7 @@ export class DashboardService {
     return {
       id: payment.id,
       clientId: payment.collectionSend.collection.clientId,
-      clientName: `${client.firstName} ${client.lastName}`.trim(),
+      clientName: `${client.firstName} ${client.lastName ?? ''}`.trim(),
       status: 'rejected',
       amountUsd: Number(payment.collectionSend.amountUsd),
       detail: 'Comprobante no válido',

@@ -1029,7 +1029,7 @@ export class WhatsappBotService {
           to: phoneNumber,
           templateName: TEMPLATE_NAME_AFTERNOON_FOLLOWUP,
           bodyParameters: {
-            client_name: `${client.firstName} ${client.lastName}`.trim(),
+            client_name: `${client.firstName} ${client.lastName ?? ''}`.trim(),
             amount: `${Number(send.amountUsd).toFixed(2)}$`,
             amount_bs: `${Number(send.amountBs).toFixed(2)} Bs.`,
           },
@@ -1293,7 +1293,7 @@ export class WhatsappBotService {
     installmentNumber: number,
   ): Record<string, string> {
     const currentDate = new Date().toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
-    const clientName = `${collection.client.firstName} ${collection.client.lastName}`;
+    const clientName = `${collection.client.firstName} ${collection.client.lastName ?? ''}`.trim();
     const paymentDescription = collection.concept || 'Pago pendiente';
 
     if (this.usesPaymentDateParameters(templateName)) {
