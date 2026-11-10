@@ -29,8 +29,8 @@ export class Client {
   @Column({ type: 'varchar', length: 120 })
   firstName!: string;
 
-  @Column({ type: 'varchar', length: 120 })
-  lastName!: string;
+  @Column({ type: 'varchar', length: 120, nullable: true })
+  lastName!: string | null;
 
   @Column({ type: 'varchar', length: 120, nullable: true })
   nickname!: string | null;

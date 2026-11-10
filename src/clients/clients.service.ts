@@ -155,10 +155,6 @@ export class ClientsService {
       throw new BadRequestException('El nombre es obligatorio.');
     }
 
-    if (!lastName) {
-      throw new BadRequestException('El apellido es obligatorio.');
-    }
-
     const phoneCode = this.normalizePhoneCode(payload.phoneCode);
     const phoneNumber = payload.phoneNumber?.trim();
 
@@ -173,7 +169,7 @@ export class ClientsService {
     const client = this.clientsRepository.create({
       userId: payload.userId,
       firstName,
-      lastName,
+      lastName: lastName || null,
       nickname: nickname || null,
       countryCode: countryCode || '58',
       phoneCode,
@@ -200,11 +196,8 @@ export class ClientsService {
     }
 
     if (payload.lastName !== undefined) {
-      const lastName = payload.lastName.trim();
-      if (!lastName) {
-        throw new BadRequestException('El apellido no puede estar vacío.');
-      }
-      client.lastName = lastName;
+      const lastName = payload.lastName?.trim() ?? '';
+      client.lastName = lastName || null;
     }
 
     if (payload.nickname !== undefined) {
