@@ -48,10 +48,9 @@ export class WhatsappBotSchedulerService {
   }
 
   /**
-   * Envía recordatorios el día de cobro, todos los días a las 7:00 PM
+   * Envía recordatorios el día de cobro, todos los días a las 9:10 AM
    */
-  // @Cron(CronExpression.EVERY_DAY_AT_7PM, {
-  @Cron("10 10 * * *", {
+  @Cron("10 9 * * *", {
     timeZone: 'America/Caracas',
   })
   async sendPaymentDueReminders(): Promise<void> {
@@ -70,9 +69,9 @@ export class WhatsappBotSchedulerService {
   }
 
   /**
-   * A las 4:10 PM recuerda el cobro de hoy si no llegó el comprobante.
+   * A las 6:10 PM recuerda el cobro de hoy si no llegó el comprobante.
    */
-  @Cron('10 16 * * *', {
+  @Cron('10 18 * * *', {
     timeZone: 'America/Caracas',
   })
   async sendAfternoonFollowups(): Promise<void> {
