@@ -67,6 +67,10 @@ export class CollectionsService {
       frequency: payload.frequency.trim(),
       collectionDay: this.normalizeCollectionDay(payload.frequency, payload.collectionDay),
       concept: payload.concept.trim(),
+      skippedInstallments: this.normalizeSkippedInstallments(
+        payload.skippedInstallments,
+        Number(payload.installments),
+      ),
     });
 
     return this.collectionsRepository.save(collection);
@@ -121,6 +125,13 @@ export class CollectionsService {
         throw new BadRequestException('El concepto no puede estar vacío.');
       }
       collection.concept = concept;
+    }
+
+    if (payload.skippedInstallments !== undefined) {
+      collection.skippedInstallments = this.normalizeSkippedInstallments(
+        payload.skippedInstallments,
+        Number(collection.installments),
+      );
     }
 
     this.validatePayload(collection);
@@ -283,6 +294,56 @@ export class CollectionsService {
     if (!(payload as { concept?: string | null }).concept?.trim()) {
       throw new BadRequestException('El concepto es obligatorio.');
     }
+  }
+
+  isInstallmentSkipped(collection: { skippedInstallments?: string | null }, installment: number): boolean {
+    const current = Number(installment);
+    return this.skippedInstallmentNumbers(collection).includes(current);
+  }
+
+  wasSkipHandledToday(collection: { skipHandledOn?: string | null }): boolean {
+    return collection.skipHandledOn === this.caracasDateKey();
+  }
+
+  /**
+   * La cuota en curso no se cobra: baja la deuda en el monto de una cuota y pasa a la siguiente.
+   */
+  async waiveCurrentInstallment(collection: Collection): Promise<Collection> {
+    const installments = Number(collection.installments);
+    const amount = Number((Number(collection.totalDebt) / installments).toFixed(2));
+    collection.currentDebt = Math.max(0, Number((Number(collection.currentDebt) - amount).toFixed(2)));
+    collection.currentInstallment = Number(collection.currentInstallment) + 1;
+    collection.skipHandledOn = this.caracasDateKey();
+    return this.collectionsRepository.save(collection);
+  }
+
+  private normalizeSkippedInstallments(value: number[] | undefined, installments: number): string | null {
+    if (!value?.length) {
+      return null;
+    }
+
+    const numbers = value.map((item) => Number(item));
+    if (numbers.some((item) => !Number.isInteger(item) || item < 1 || item > installments)) {
+      throw new BadRequestException('Las cuotas sin cobro deben estar entre 1 y el total de cuotas.');
+    }
+
+    return [...new Set(numbers)].sort((left, right) => left - right).join(',');
+  }
+
+  private skippedInstallmentNumbers(collection: { skippedInstallments?: string | null }): number[] {
+    return String(collection.skippedInstallments ?? '')
+      .split(',')
+      .map((part) => Number(part.trim()))
+      .filter((item) => Number.isInteger(item) && item > 0);
+  }
+
+  private caracasDateKey(date = new Date()): string {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Caracas',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(date);
   }
 
   /**

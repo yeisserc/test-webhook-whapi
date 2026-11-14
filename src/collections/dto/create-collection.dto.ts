@@ -6,4 +6,5 @@ export class CreateCollectionDto {
   frequency!: string;
   collectionDay?: string;
   concept!: string;
+  skippedInstallments?: number[];
 }

@@ -84,6 +84,10 @@ export class WhatsappBotService {
         throw new BadRequestException('Cobranza no encontrada');
       }
 
+      if (this.collectionsService.isInstallmentSkipped(collection, collection.currentInstallment)) {
+        return null;
+      }
+
       const currency = 'USD';
       const currencyRate = await this.currencyRatesService.getCurrentRate(currency);
       const amountUsd = Number((collection.totalDebt / collection.installments).toFixed(2));
@@ -164,6 +168,10 @@ export class WhatsappBotService {
 
     if (collection.currentInstallment > collection.installments) {
       throw new BadRequestException('Todas las cuotas de esta cobranza ya fueron cobradas.');
+    }
+
+    if (this.collectionsService.isInstallmentSkipped(collection, collection.currentInstallment)) {
+      throw new BadRequestException('Esta cuota no se cobra.');
     }
 
     const client = collection.client;
@@ -1134,6 +1142,13 @@ export class WhatsappBotService {
       const collections = await this.getCollectionsNeedingReminders(daysOffset);
       for (const collection of collections) {
         try {
+          if (this.collectionsService.isInstallmentSkipped(collection, collection.currentInstallment)) {
+            if (daysOffset === 0 && !this.collectionsService.wasSkipHandledToday(collection)) {
+              await this.collectionsService.waiveCurrentInstallment(collection);
+            }
+            continue;
+          }
+
           await this.sendReminder({
             collectionId: collection.id,
             daysUntilPayment: daysOffset,
