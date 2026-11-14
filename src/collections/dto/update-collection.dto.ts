@@ -8,4 +8,5 @@ export class UpdateCollectionDto {
 	frequency?: string;
 	collectionDay?: string;
 	concept?: string;
+	skippedInstallments?: number[];
 }

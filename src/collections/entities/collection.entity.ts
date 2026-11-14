@@ -75,6 +75,14 @@ export class Collection {
   @Column({ type: 'varchar', length: 255 })
   concept!: string;
 
+  /** Números de cuota que no se cobran, separados por coma. Ejemplo: "4,6". */
+  @Column({ name: 'skipped_installments', type: 'varchar', length: 120, nullable: true })
+  skippedInstallments!: string | null;
+
+  /** Día de Caracas (YYYY-MM-DD) en que ya se saltó la cuota exenta. */
+  @Column({ name: 'skip_handled_on', type: 'varchar', length: 10, nullable: true })
+  skipHandledOn!: string | null;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
 

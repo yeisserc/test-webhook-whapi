@@ -72,7 +72,9 @@ export class DashboardService {
       sends.map((send) => `${send.collectionId}:${send.installmentNumber}`),
     );
     const pendingToSend = activeCollections.filter(
-      (collection) => !sentInstallments.has(`${collection.id}:${collection.currentInstallment}`),
+      (collection) =>
+        !this.collectionsService.isInstallmentSkipped(collection, collection.currentInstallment) &&
+        !sentInstallments.has(`${collection.id}:${collection.currentInstallment}`),
     );
     const verifiedPayments = payments.filter((payment) => payment.status === 'verified');
     const todaySends = sends
@@ -193,6 +195,10 @@ export class DashboardService {
       clientId: collection.clientId,
       clientName: `${collection.client.firstName} ${collection.client.lastName ?? ''}`.trim(),
       installmentNumber: collection.currentInstallment,
+      chargeSkipped: this.collectionsService.isInstallmentSkipped(
+        collection,
+        collection.currentInstallment,
+      ),
       amountUsd: Number(Number(collection.totalDebt / collection.installments).toFixed(2)),
       chargeDate,
       reminderDate: this.dateKey(reminder),
