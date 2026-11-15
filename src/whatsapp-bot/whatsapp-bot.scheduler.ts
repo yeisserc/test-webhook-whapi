@@ -48,9 +48,9 @@ export class WhatsappBotSchedulerService {
   }
 
   /**
-   * Envía recordatorios el día de cobro, todos los días a las 9:10 AM
+   * Envía recordatorios el día de cobro, todos los días a las 8:10 AM
    */
-  @Cron("10 9 * * *", {
+  @Cron("10 8 * * *", {
     timeZone: 'America/Caracas',
   })
   async sendPaymentDueReminders(): Promise<void> {
@@ -90,9 +90,9 @@ export class WhatsappBotSchedulerService {
   }
 
   /**
-   * A las 9:10 AM reenvía el cobro de ayer y el de hace dos días si siguen sin comprobante.
+   * A las 8:10 AM reenvía el cobro de ayer y el de hace dos días si siguen sin comprobante.
    */
-  @Cron('10 9 * * *', {
+  @Cron('10 8 * * *', {
     timeZone: 'America/Caracas',
   })
   async sendNextDayFollowups(): Promise<void> {
@@ -111,11 +111,9 @@ export class WhatsappBotSchedulerService {
   }
 
   /**
-   * Verifica automáticamente los pagos pendientes
-   * Se ejecutaría cada 30 minutos con: @Cron(CronExpression.EVERY_30_MINUTES)
+   * Verifica automáticamente los pagos pendientes cada 2 minutos
    */ 
-  // @Cron(CronExpression.EVERY_10_MINUTES, {
-  @Cron('0 */3 * * * *', {
+  @Cron('0 */2 * * * *', {
     timeZone: 'America/Caracas',
   })
   async verifyPendingPayments(): Promise<void> {
