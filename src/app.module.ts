@@ -5,6 +5,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
+import { AdminModule } from './admin/admin.module';
 import { BankAutomationModule } from './bank-automation/bank-automation.module';
 import { ClientsModule } from './clients/clients.module';
 import { CollectionsModule } from './collections/collections.module';
@@ -46,6 +47,7 @@ import { WhatsappModule } from './whatsapp/whatsapp.module';
       },
     }),
     UsersModule,
+    AdminModule,
     ClientsModule,
     CollectionsModule,
     CurrencyRatesModule,

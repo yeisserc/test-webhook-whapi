@@ -95,6 +95,10 @@ export class UsersService {
       throw new UnauthorizedException('Correo o contraseña incorrectos.');
     }
 
+    if (user.isActive === false) {
+      throw new UnauthorizedException('Esta cuenta está desactivada.');
+    }
+
     return this.toPublicUser(user);
   }
 
