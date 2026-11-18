@@ -18,6 +18,13 @@ export class User {
   @Column({ type: 'varchar', length: 255, unique: true })
   email!: string;
 
+  /** customer | admin */
+  @Column({ type: 'varchar', length: 20, default: 'customer' })
+  role!: string;
+
+  @Column({ name: 'is_active', type: 'boolean', default: true })
+  isActive!: boolean;
+
   @Column({ type: 'varchar', length: 255 })
   password!: string;
 
