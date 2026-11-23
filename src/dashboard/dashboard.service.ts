@@ -9,7 +9,7 @@ import { User } from '../users/entities/user.entity';
 import { CollectionSend } from '../whatsapp-bot/entities/collection-send.entity';
 import { Payment } from '../whatsapp-bot/entities/payment.entity';
 
-const CHARGE_SEND_TIME = '10:10 a. m.';
+const CHARGE_SEND_TIME = '8:10 a. m.';
 
 type SetupStep = {
   id: string;
