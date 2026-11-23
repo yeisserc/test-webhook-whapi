@@ -41,6 +41,8 @@ export class UsersService {
   async register(payload: RegisterUserDto) {
     const email = payload.email?.trim().toLowerCase();
     const password = payload.password?.trim();
+    const phoneCode = payload.phoneCode?.trim();
+    const phoneDigits = payload.phoneNumber?.trim();
 
     if (!email) {
       throw new BadRequestException('El correo es obligatorio.');
@@ -54,6 +56,22 @@ export class UsersService {
       throw new BadRequestException('La contraseña debe tener al menos 6 caracteres.');
     }
 
+    if (!phoneCode) {
+      throw new BadRequestException('El código de teléfono es obligatorio.');
+    }
+
+    if (!phoneDigits) {
+      throw new BadRequestException('El número de teléfono es obligatorio.');
+    }
+
+    // Formato internacional: 58 + código sin 0 + número (ej. 584245667806)
+    const normalizedCode = phoneCode.replace(/\D/g, '').replace(/^0+/, '');
+    const normalizedDigits = phoneDigits.replace(/\D/g, '');
+    if (!normalizedCode || !normalizedDigits) {
+      throw new BadRequestException('El número de teléfono no es válido.');
+    }
+    const phoneNumber = `58${normalizedCode}${normalizedDigits}`;
+
     const existing = await this.usersRepository.findOne({ where: { email } });
     if (existing) {
       throw new BadRequestException('Ya existe un usuario con este correo.');
@@ -63,7 +81,7 @@ export class UsersService {
     const user = this.usersRepository.create({
       email,
       password: hashedPassword,
-      phoneNumber: null,
+      phoneNumber,
       bankUsername: null,
       bankPassword: null,
       validBankCredentials: false,
