@@ -27,9 +27,9 @@ export class CurrencyRatesScheduler {
   }
 
   /**
-   * Lunes a viernes a las 4:05 PM (hora Venezuela): toma la tasa USD del BCV.
+   * Lunes a viernes a las 5:05 PM (hora Venezuela): toma la tasa USD del BCV.
    */
-  @Cron('5 16 * * 1-5', {
+  @Cron('5 17 * * 1-5', {
     timeZone: 'America/Caracas',
   })
   async updateUsdRateFromBcv(): Promise<void> {
