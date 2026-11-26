@@ -531,7 +531,7 @@ export class WhatsappBotService {
   }
 
   /**
-   * Verifica los pagos pendientes de cada cuenta en una sola sesión de banco.
+   * Verifica los pagos pendientes: una sesión de banco por usuario, en paralelo entre usuarios.
    * Si el ciclo anterior sigue abierto, este no arranca.
    */
   async verifyPendingPaymentsBatch(): Promise<number> {
@@ -553,10 +553,23 @@ export class WhatsappBotService {
         groups.set(userId, group);
       }
 
-      let processed = 0;
-      for (const payments of groups.values()) {
-        processed += await this.verifyUserPaymentsInOneSession(payments);
-      }
+      const settled = await Promise.allSettled(
+        [...groups.entries()].map(async ([userId, payments]) => {
+          try {
+            return await this.verifyUserPaymentsInOneSession(payments);
+          } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : String(error);
+            this.logger.error(
+              `Error verificando pagos del usuario ${userId}: ${message}`,
+            );
+            throw error;
+          }
+        }),
+      );
+
+      const processed = settled.reduce((total, result) => {
+        return total + (result.status === 'fulfilled' ? result.value : 0);
+      }, 0);
 
       this.logger.log(`${processed} pagos pendientes procesados en este ciclo`);
       return processed;
