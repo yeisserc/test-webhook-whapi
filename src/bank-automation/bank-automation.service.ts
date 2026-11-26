@@ -87,8 +87,17 @@ export type BdvPaymentVerificationResult = VerifyPaymentBancoDeVenezuelaResult &
 
 @Injectable()
 export class BankAutomationService {
-  /** Una sola sesión de navegador a la vez: el banco no admite dos ingresos de la misma cuenta. */
-  private browserGate: Promise<void> = Promise.resolve();
+  /**
+   * Una sesión de navegador por cuenta bancaria: el BDV no admite dos ingresos de la misma cuenta.
+   * Cuentas distintas pueden verificarse en paralelo, hasta maxConcurrentBrowsers.
+   */
+  private readonly accountGates = new Map<string, Promise<void>>();
+  private readonly maxConcurrentBrowsers = Math.max(
+    1,
+    Number(process.env.BANK_VERIFY_MAX_CONCURRENT ?? 3) || 3,
+  );
+  private activeBrowsers = 0;
+  private readonly browserWaitQueue: Array<() => void> = [];
 
   constructor(private readonly openaiExtractionService: OpenaiExtractionService) {}
 
@@ -148,21 +157,51 @@ export class BankAutomationService {
       return [];
     }
 
-    return this.withBrowserLock(() => this.verifyPaymentsInOneSession(payload));
+    const accountKey = payload.credentials?.username?.trim().toLowerCase() || '__default__';
+    return this.withAccountBrowserLock(accountKey, () => this.verifyPaymentsInOneSession(payload));
   }
 
-  private async withBrowserLock<T>(work: () => Promise<T>): Promise<T> {
-    const previous = this.browserGate;
-    let release!: () => void;
-    this.browserGate = new Promise<void>((resolve) => {
-      release = resolve;
+  /** Serializa por cuenta y limita Chromium concurrentes entre cuentas distintas. */
+  private async withAccountBrowserLock<T>(accountKey: string, work: () => Promise<T>): Promise<T> {
+    const previous = this.accountGates.get(accountKey) ?? Promise.resolve();
+    let releaseAccount!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      releaseAccount = resolve;
     });
+    const queued = previous.then(() => gate);
+    this.accountGates.set(accountKey, queued);
 
     await previous;
     try {
-      return await work();
+      await this.acquireBrowserSlot();
+      try {
+        return await work();
+      } finally {
+        this.releaseBrowserSlot();
+      }
     } finally {
-      release();
+      releaseAccount();
+      // Solo borra si nadie más encoló después de esta sesión.
+      if (this.accountGates.get(accountKey) === queued) {
+        this.accountGates.delete(accountKey);
+      }
+    }
+  }
+
+  private async acquireBrowserSlot(): Promise<void> {
+    while (this.activeBrowsers >= this.maxConcurrentBrowsers) {
+      await new Promise<void>((resolve) => {
+        this.browserWaitQueue.push(resolve);
+      });
+    }
+    this.activeBrowsers += 1;
+  }
+
+  private releaseBrowserSlot(): void {
+    this.activeBrowsers = Math.max(0, this.activeBrowsers - 1);
+    const next = this.browserWaitQueue.shift();
+    if (next) {
+      next();
     }
   }
 
@@ -265,8 +304,13 @@ export class BankAutomationService {
         movementIsCorrect: false,
       }));
     } finally {
-      await context?.close();
-      await browser?.close();
+      await context?.close().catch((error) => {
+        console.error('Error closing browser context:', error);
+      });
+    
+      await browser?.close().catch((error) => {
+        console.error('Error closing browser:', error);
+      });
     }
   }
 
